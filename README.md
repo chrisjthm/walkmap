@@ -34,6 +34,11 @@ This starts:
 - API on `http://localhost:8000`
 - Frontend on `http://localhost:5173`
 
+Alternatively, you can use the startup script:
+```bash
+./scripts/startup.sh
+```
+
 ### 3. Verify services
 
 - API health check:
@@ -54,6 +59,11 @@ Expected response:
 docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT PostGIS_Version();"
 ```
 
+Alternatively, you can run the verify services script:
+```bash
+./scripts/verify-services.sh
+```
+
 ### 4. Stop services
 
 ```bash
@@ -66,9 +76,34 @@ To also remove volumes:
 docker compose down -v
 ```
 
+Alternatively, you can run the teardown script:
+```bash
+./scripts/teardown.sh
+```
+
 ## Development Notes
 
 - API hot reload is enabled via `uvicorn --reload`.
 - Frontend hot reload is enabled by Vite.
 - Postgres data persists in the `postgres_data` Docker volume across restarts.
 - If `.env` is missing or required variables are unset, Compose fails fast with a clear error.
+
+## Database Migrations
+
+Run Alembic migrations in the API container:
+
+```bash
+./scripts/db-migrate.sh
+```
+
+To downgrade back to base:
+
+```bash
+./scripts/db-downgrade.sh
+```
+
+To run the A2 verification checks (upgrade, schema checks, constraints, downgrade, idempotency):
+
+```bash
+./scripts/db-verify.sh
+```
