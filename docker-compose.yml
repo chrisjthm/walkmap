@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: walkmap-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Missing POSTGRES_DB. Copy .env.example to .env and set values.}
+      POSTGRES_USER: ${POSTGRES_USER:?Missing POSTGRES_USER. Copy .env.example to .env and set values.}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Missing POSTGRES_PASSWORD. Copy .env.example to .env and set values.}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ./api
+    container_name: walkmap-api
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Missing DATABASE_URL. Copy .env.example to .env and set values.}
+      JWT_SECRET: ${JWT_SECRET:?Missing JWT_SECRET. Copy .env.example to .env and set values.}
+      MAPBOX_TOKEN: ${MAPBOX_TOKEN:?Missing MAPBOX_TOKEN. Copy .env.example to .env and set values.}
+    volumes:
+      - ./api:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: walkmap-frontend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:?Missing VITE_API_BASE_URL. Copy .env.example to .env and set values.}
+      VITE_MAPBOX_TOKEN: ${MAPBOX_TOKEN:?Missing MAPBOX_TOKEN. Copy .env.example to .env and set values.}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
