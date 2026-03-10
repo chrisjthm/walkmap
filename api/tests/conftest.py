@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -22,12 +23,28 @@ def _alembic_config(database_url: str) -> Config:
     return alembic_config
 
 
+def _wait_for_db(database_url: str, timeout_seconds: int = 60, interval: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            engine = create_engine(database_url, connect_args={"connect_timeout": 5})
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            time.sleep(interval)
+    raise RuntimeError("Database did not become ready in time") from last_error
+
+
 @pytest.fixture(scope="session")
 def db_engine():
     database_url = _get_database_url()
     if not database_url:
         pytest.skip("DATABASE_URL is not set")
 
+    _wait_for_db(database_url)
     engine = create_engine(database_url)
     command.upgrade(_alembic_config(database_url), "head")
     return engine
