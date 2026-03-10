@@ -17,7 +17,7 @@ Walkmap is a web app for planning urban walks and runs optimized for route exper
 Create a local env file from the template:
 
 ```bash
-cp .env.example .env
+touch .env
 ```
 
 Then edit `.env` values as needed (especially `JWT_SECRET` and `MAPBOX_TOKEN`).

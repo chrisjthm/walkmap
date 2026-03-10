@@ -1,0 +1,27 @@
+# Env files
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+
+# Node
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.yarn-cache/
+
+# Vite / build
+frontend/dist/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
