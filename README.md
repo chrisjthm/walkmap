@@ -34,6 +34,11 @@ This starts:
 - API on `http://localhost:8000`
 - Frontend on `http://localhost:5173`
 
+Alternatively, you can use the startup script:
+```bash
+./scripts/startup.sh
+```
+
 ### 3. Verify services
 
 - API health check:
@@ -54,6 +59,11 @@ Expected response:
 docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT PostGIS_Version();"
 ```
 
+Alternatively, you can run the verify services script:
+```bash
+./scripts/verify-services.sh
+```
+
 ### 4. Stop services
 
 ```bash
@@ -64,6 +74,11 @@ To also remove volumes:
 
 ```bash
 docker compose down -v
+```
+
+Alternatively, you can run the teardown script:
+```bash
+./scripts/teardown.sh
 ```
 
 ## Development Notes
