@@ -28,7 +28,11 @@ def _wait_for_db(database_url: str, timeout_seconds: int = 60, interval: float =
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            engine = create_engine(database_url, connect_args={"connect_timeout": 5})
+            engine = create_engine(
+                database_url,
+                connect_args={"connect_timeout": 5, "options": "-c statement_timeout=30000"},
+                pool_pre_ping=True,
+            )
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             return
@@ -44,15 +48,23 @@ def db_engine():
     if not database_url:
         pytest.skip("DATABASE_URL is not set")
 
+    print("Waiting for database to become ready...", flush=True)
     _wait_for_db(database_url)
-    engine = create_engine(database_url)
+    engine = create_engine(
+        database_url,
+        connect_args={"connect_timeout": 5, "options": "-c statement_timeout=30000"},
+        pool_pre_ping=True,
+    )
+    print("Running Alembic migrations...", flush=True)
     command.upgrade(_alembic_config(database_url), "head")
+    print("Migrations complete.", flush=True)
     return engine
 
 
 @pytest.fixture()
 def db_connection(db_engine):
     with db_engine.begin() as connection:
+        connection.execute(text("SET statement_timeout = '30s'"))
         connection.execute(
             text(
                 "TRUNCATE TABLE ratings, routes, segments, users RESTART IDENTITY CASCADE"
