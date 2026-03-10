@@ -1,6 +1,6 @@
 from fastapi import BackgroundTasks, FastAPI
 
-from app.ingest import BoundingBox, DEFAULT_BBOX, OSMDataProvider, ingest_segments
+from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, ingest_segments
 
 app = FastAPI(title="Walkmap API")
 

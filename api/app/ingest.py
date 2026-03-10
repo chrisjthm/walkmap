@@ -13,7 +13,6 @@ from sqlalchemy.sql import func
 
 from app.db.models import Segment
 
-
 DEFAULT_BBOX = {
     "north": 40.7282,
     "south": 40.7080,

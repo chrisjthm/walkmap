@@ -3,9 +3,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine, text
+
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
