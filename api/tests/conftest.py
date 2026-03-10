@@ -52,7 +52,7 @@ def db_engine():
     _wait_for_db(database_url)
     engine = create_engine(
         database_url,
-        connect_args={"connect_timeout": 5, "options": "-c statement_timeout=30000"},
+        connect_args={"connect_timeout": 5, "options": "-c statement_timeout=0"},
         pool_pre_ping=True,
     )
     print("Running Alembic migrations...", flush=True)
@@ -64,7 +64,7 @@ def db_engine():
 @pytest.fixture()
 def db_connection(db_engine):
     with db_engine.begin() as connection:
-        connection.execute(text("SET statement_timeout = '30s'"))
+        connection.execute(text("SET statement_timeout = '0'"))
         connection.execute(
             text(
                 "TRUNCATE TABLE ratings, routes, segments, users RESTART IDENTITY CASCADE"
