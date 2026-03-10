@@ -121,20 +121,25 @@ def normalize_value(value: Any) -> Any:
 
 
 def get_engine() -> Engine:
-    """Create a SQLAlchemy engine from DATABASE_URL."""
+    """Create a SQLAlchemy engine from DATABASE_URL with a short connect timeout."""
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not set")
-    return create_engine(database_url)
+    return create_engine(database_url, connect_args={"connect_timeout": 5})
 
 
-def ingest_segments(bbox: BoundingBox, provider: DataProvider, chunk_size: int = 500) -> int:
+def ingest_segments(
+    bbox: BoundingBox,
+    provider: DataProvider,
+    chunk_size: int = 500,
+    engine: Engine | None = None,
+) -> int:
     """Upsert segments into the database and return the written row count."""
     segments = provider.fetch_segments(bbox)
     if not segments:
         return 0
 
-    engine = get_engine()
+    engine = engine or get_engine()
     table = Segment.__table__
 
     rows: list[dict[str, Any]] = []

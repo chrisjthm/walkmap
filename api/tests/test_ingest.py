@@ -47,8 +47,8 @@ def test_ingest_segments_inserts_and_is_idempotent(db_connection) -> None:
     ]
     provider = FakeProvider(records)
 
-    count_first = ingest_segments(bbox, provider)
-    count_second = ingest_segments(bbox, provider)
+    count_first = ingest_segments(bbox, provider, engine=db_connection.engine)
+    count_second = ingest_segments(bbox, provider, engine=db_connection.engine)
 
     total = db_connection.execute(text("SELECT COUNT(*) FROM segments")).scalar_one()
     assert total == 2
@@ -65,7 +65,7 @@ def test_ingest_segments_geometry_and_ai_fields(db_connection) -> None:
         )
     ]
     provider = FakeProvider(records)
-    ingest_segments(bbox, provider)
+    ingest_segments(bbox, provider, engine=db_connection.engine)
 
     wkt = db_connection.execute(
         text("SELECT ST_AsText(geometry) FROM segments WHERE id = 'seg-3'")
