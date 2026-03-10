@@ -72,3 +72,23 @@ docker compose down -v
 - Frontend hot reload is enabled by Vite.
 - Postgres data persists in the `postgres_data` Docker volume across restarts.
 - If `.env` is missing or required variables are unset, Compose fails fast with a clear error.
+
+## Database Migrations
+
+Run Alembic migrations in the API container:
+
+```bash
+./scripts/db-migrate.sh
+```
+
+To downgrade back to base:
+
+```bash
+./scripts/db-downgrade.sh
+```
+
+To run the A2 verification checks (upgrade, schema checks, constraints, downgrade, idempotency):
+
+```bash
+./scripts/db-verify.sh
+```
