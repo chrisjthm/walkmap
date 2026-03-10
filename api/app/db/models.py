@@ -4,7 +4,7 @@ import uuid
 
 from geoalchemy2 import Geometry
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID, ENUM
+from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 

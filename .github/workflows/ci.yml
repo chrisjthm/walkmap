@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: walkmap
+          POSTGRES_USER: walkmap
+          POSTGRES_PASSWORD: walkmap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U walkmap -d walkmap"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DATABASE_URL: postgresql+psycopg://walkmap:walkmap@localhost:5432/walkmap
+      PYTHONPATH: ./api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        working-directory: api
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run pytest
+        working-directory: api
+        run: pytest
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+      - name: Run vitest
+        working-directory: frontend
+        run: npm run test
+      - name: Run typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        working-directory: api
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Ruff
+        run: ruff check api
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
