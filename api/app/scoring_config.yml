@@ -1,0 +1,29 @@
+# Scoring scale:
+# - Base score starts at 50 in code.
+# - Each factor adds or subtracts from that base based on weights below.
+# - Final score is clamped to 0–100.
+#
+# Maintenance guidance:
+# - Keep weights in a reasonable range (roughly -40 to +40) to avoid
+#   overpowering the base score.
+# - Adjust one factor at a time and rerun tests to validate expected behavior.
+# - Thresholds control how quickly a factor reaches full effect.
+
+weights:
+  road_type_positive: 15.0
+  road_type_negative: -30.0
+  sidewalk_positive: 8.0
+  sidewalk_negative: -12.0
+  surface_positive: 4.0
+  surface_negative: -4.0
+  tree_cover: 6.0
+  waterfront: 12.0
+  business_density: 8.0
+  park_adjacency: 6.0
+  industrial_landuse: -12.0
+  residential_landuse: 6.0
+  speed_limit: -10.0
+
+thresholds:
+  business_density: 5
+  speed_limit_mph: 45
