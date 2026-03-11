@@ -6,7 +6,6 @@ from typing import Any
 
 import yaml
 
-
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("scoring_config.yml")
 
 
