@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Protocol
 
 from geoalchemy2.shape import from_shape
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import func
 
@@ -133,13 +133,15 @@ def ingest_segments(
     provider: DataProvider,
     chunk_size: int = 500,
     engine: Engine | None = None,
+    connection: Connection | None = None,
 ) -> int:
     """Upsert segments into the database and return the written row count."""
     segments = provider.fetch_segments(bbox)
     if not segments:
         return 0
 
-    engine = engine or get_engine()
+    if connection is None:
+        engine = engine or get_engine()
     table = Segment.__table__
 
     rows: list[dict[str, Any]] = []
@@ -158,20 +160,29 @@ def ingest_segments(
         )
 
     total_written = 0
-    with engine.begin() as connection:
-        for batch in chunked(rows, chunk_size):
-            stmt = insert(table).values(batch)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[table.c.id],
-                set_={
-                    "geometry": stmt.excluded.geometry,
-                    "osm_tags": stmt.excluded.osm_tags,
-                    "last_updated": stmt.excluded.last_updated,
-                },
-            )
-            result = connection.execute(stmt)
-            total_written += result.rowcount or 0
+    if connection is None:
+        with engine.begin() as connection:
+            total_written = _write_batches(connection, table, rows, chunk_size)
+    else:
+        total_written = _write_batches(connection, table, rows, chunk_size)
 
+    return total_written
+
+
+def _write_batches(connection: Connection, table, rows: list[dict[str, Any]], chunk_size: int) -> int:
+    total_written = 0
+    for batch in chunked(rows, chunk_size):
+        stmt = insert(table).values(batch)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[table.c.id],
+            set_={
+                "geometry": stmt.excluded.geometry,
+                "osm_tags": stmt.excluded.osm_tags,
+                "last_updated": stmt.excluded.last_updated,
+            },
+        )
+        result = connection.execute(stmt)
+        total_written += result.rowcount or 0
     return total_written
 
 
