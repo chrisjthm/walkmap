@@ -1,6 +1,7 @@
 from fastapi import BackgroundTasks, FastAPI
 
 from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, ingest_segments
+from app.score_batch import run_batch_scoring
 
 app = FastAPI(title="Walkmap API")
 
@@ -24,3 +25,14 @@ def ingest_osm(background_tasks: BackgroundTasks) -> dict[str, str | dict[str, f
     provider = OSMDataProvider()
     background_tasks.add_task(ingest_segments, bbox, provider)
     return {"status": "queued", "bbox": DEFAULT_BBOX}
+
+
+@app.post("/admin/score/batch")
+def score_batch(background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Queue a background scoring run for unscored segments.
+
+    This endpoint is intended for manual/admin use to apply AI scores
+    to any segments that still have ai_score = NULL.
+    """
+    background_tasks.add_task(run_batch_scoring)
+    return {"status": "queued"}
