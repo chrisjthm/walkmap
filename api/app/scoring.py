@@ -44,26 +44,26 @@ def score_segment(
     factors: dict[str, float] = {}
 
     highway = osm_tags.get("highway")
-    if highway in {"footway", "path", "residential", "living_street", "pedestrian"}:
+    if _tag_in(highway, {"footway", "path", "residential", "living_street", "pedestrian"}):
         factors["road_type_positive"] = 1.0
         score += weights.get("road_type_positive", 0.0)
-    if highway in {"motorway", "trunk", "primary"}:
+    if _tag_in(highway, {"motorway", "trunk", "primary"}):
         factors["road_type_negative"] = 1.0
         score += weights.get("road_type_negative", 0.0)
 
     sidewalk = osm_tags.get("sidewalk")
-    if sidewalk in {"both", "left", "right", "yes"}:
+    if _tag_in(sidewalk, {"both", "left", "right", "yes"}):
         factors["sidewalk_positive"] = 1.0
         score += weights.get("sidewalk_positive", 0.0)
-    if sidewalk == "no":
+    if _tag_in(sidewalk, {"no"}):
         factors["sidewalk_negative"] = 1.0
         score += weights.get("sidewalk_negative", 0.0)
 
     surface = osm_tags.get("surface")
-    if surface in {"paved", "asphalt", "cobblestone", "paving_stones"}:
+    if _tag_in(surface, {"paved", "asphalt", "cobblestone", "paving_stones"}):
         factors["surface_positive"] = 1.0
         score += weights.get("surface_positive", 0.0)
-    if surface in {"dirt", "gravel", "sand", "ground", "mud"}:
+    if _tag_in(surface, {"dirt", "gravel", "sand", "ground", "mud"}):
         factors["surface_negative"] = 1.0
         score += weights.get("surface_negative", 0.0)
 
@@ -146,6 +146,18 @@ def compute_user_score(ratings: list[bool], prior: float = 50.0, prior_weight: i
     return raw_score
 
 
+def _tag_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item is not None]
+    return [str(value)]
+
+
+def _tag_in(value: Any, options: set[str]) -> bool:
+    return any(tag in options for tag in _tag_values(value))
+
+
 def _has_tree_cover(osm_tags: dict, nearby_pois: list[dict]) -> bool:
     if osm_tags.get("natural") == "tree_row":
         return True
@@ -184,7 +196,7 @@ def _is_park_adjacent(osm_tags: dict, nearby_pois: list[dict]) -> bool:
 def _is_industrial(osm_tags: dict, nearby_pois: list[dict]) -> bool:
     industrial_tags = {"industrial", "commercial", "parking", "warehouse"}
     landuse = osm_tags.get("landuse")
-    if landuse in industrial_tags:
+    if _tag_in(landuse, industrial_tags):
         return True
     return any(poi.get("landuse") in industrial_tags for poi in nearby_pois)
 
@@ -192,21 +204,26 @@ def _is_industrial(osm_tags: dict, nearby_pois: list[dict]) -> bool:
 def _is_residential(osm_tags: dict) -> bool:
     landuse = osm_tags.get("landuse")
     highway = osm_tags.get("highway")
-    return landuse == "residential" and highway in {"residential", "living_street"}
+    return _tag_in(landuse, {"residential"}) and _tag_in(
+        highway, {"residential", "living_street"}
+    )
 
 
 def _maxspeed_over(maxspeed: Any, limit: int) -> bool:
     if maxspeed is None:
         return False
-    if isinstance(maxspeed, (int, float)):
-        return maxspeed > limit
-    if isinstance(maxspeed, str):
-        digits = "".join(ch for ch in maxspeed if ch.isdigit())
+    for value in _tag_values(maxspeed):
+        if isinstance(value, (int, float)):
+            if value > limit:
+                return True
+            continue
+        digits = "".join(ch for ch in str(value) if ch.isdigit())
         if digits:
             try:
-                return int(digits) > limit
+                if int(digits) > limit:
+                    return True
             except ValueError:
-                return False
+                continue
     return False
 
 

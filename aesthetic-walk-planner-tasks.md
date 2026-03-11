@@ -482,7 +482,7 @@ Preference for segments adjacent to already-verified high-scoring segments is im
 ### E1 — Project Setup & Base Layout
 
 **Description:**
-Initialize the React + TypeScript frontend with Vite. Configure Tailwind CSS, React Query, and React Router. Establish the base layout: a full-screen map area with a collapsible side panel.
+Initialize the React + TypeScript frontend with Vite. Configure Tailwind CSS, React Query, and React Router. Establish the base layout: a full-screen map area with a collapsible side panel. The map provider for E2 is MapLibre GL JS with OpenFreeMap styles (no Mapbox token required).
 
 Routes:
 - `/` — map view (default)
@@ -508,12 +508,13 @@ Routes:
 ### E2 — Map View & Aesthetic Overlay
 
 **Description:**
-Implement the map view using Mapbox GL JS. Street segments are rendered as a colored line layer sourced from `GET /segments?bbox=...`.
+Implement the map view using MapLibre GL JS with OpenFreeMap styles/tiles. Street segments are rendered as a colored line layer sourced from `GET /segments?bbox=...`.
 
 Implementation notes:
 - Fetch segments on map load and on `moveend` event (debounced 300ms)
-- Render as a Mapbox GeoJSON source + `line` layer
-- Color expression: Mapbox `interpolate` expression mapping score 0–100 to the gradient in spec Section 4.3
+- Render as a MapLibre GeoJSON source + `line` layer
+- Base map style URL should use OpenFreeMap (e.g. `https://tiles.openfreemap.org/styles/liberty` or another approved OpenFreeMap style)
+- Color expression: MapLibre `interpolate` expression mapping score 0–100 to the gradient in spec Section 4.3
 - Unverified segments: `line-dasharray: [2, 2]`
 - Verified segments: solid line
 - Clicking a segment: opens a detail panel showing name, score, verification badge, vibe tag counts, rating count
@@ -527,7 +528,7 @@ Implementation notes:
 - Toggle buttons correctly show/hide overlay and filter to verified-only
 
 **Test cases:**
-1. Load app over Jersey City waterfront → colored segment lines visible
+1. Load app over Jersey City waterfront → OpenFreeMap basemap renders and colored segment lines visible
 2. A segment with score 85 renders deep green; a segment with score 15 renders red
 3. An unverified segment renders with a dashed line; a verified segment renders solid
 4. Click a segment → detail panel appears with `segment_id`, score, `verified` badge, vibe tags

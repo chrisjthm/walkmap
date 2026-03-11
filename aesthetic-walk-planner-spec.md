@@ -285,7 +285,7 @@ Custom graph-based routing over the OSM pedestrian network.
 | Layer | Technology | Rationale |
 |---|---|---|
 | Frontend | React + TypeScript | Component model fits the map + panel UI |
-| Map | Mapbox GL JS | Best-in-class vector tile rendering; custom segment color layers are a first-class feature |
+| Map | MapLibre GL JS + OpenFreeMap tiles | Open-source fork of Mapbox GL JS; identical rendering API, no account or token required. OpenFreeMap provides free tiles with no signup or billing risk. |
 | Styling | Tailwind CSS | Utility-first; no design decisions required |
 | Data fetching | React Query | Caching, background refresh, loading states with minimal boilerplate |
 | Backend | Python 3.12 + FastAPI | Native fit with the geospatial/OSM ecosystem; async support |
@@ -308,6 +308,15 @@ Python was selected over Java (Spring Boot) and Go for this project:
 - **Shapely + GeoAlchemy2** give native PostGIS type support with minimal glue code
 - Go has the thinnest geospatial ecosystem of the three and would require building significant infrastructure from scratch
 - Java (Spring Boot) is viable but the OSMnx/Shapely/NetworkX equivalents require substantially more boilerplate; the productivity gap is significant for a geospatial-heavy MVP
+
+### Stack Rationale: MapLibre over Mapbox
+
+MapLibre GL JS was selected over Mapbox GL JS for the MVP:
+
+- **No account or credit card required** — Mapbox requires a credit card even for the free tier, creating billing risk for a personal project
+- **Identical API** — MapLibre is a direct fork of the pre-license-change Mapbox GL JS; the `interpolate` color expressions, `line-dasharray`, GeoJSON source/layer API, and click handlers are all identical
+- **OpenFreeMap** provides high-quality, fully free tiles with no signup
+- **Swappable** — the tile URL is isolated in a single constants file; migrating to Mapbox or Stadia Maps later requires changing one line
 
 ---
 
@@ -376,5 +385,5 @@ Python was selected over Java (Spring Boot) and Go for this project:
 | Routing performance | PostGIS + pgRouting should handle the small area easily; will need profiling at city scale. |
 | "Aesthetic" subjectivity | The same block can be loved by one person and disliked by another. Vibe tags help capture this nuance better than a single score. Consider per-user personalization as a v2 feature. |
 | Cold start quality | The first few walks rely entirely on AI scores. Score calibration against real walks in Jersey City should happen in Phase 3 to tune factor weights. |
-| Mapbox cost | Mapbox free tier (50k map loads/month) is more than sufficient for personal MVP. Revisit at scale. |
+| Map tile provider | OpenFreeMap is used for MVP to avoid any billing risk. If higher-fidelity tiles are needed at scale, Mapbox or Stadia Maps can be swapped in by changing the tile URL constant. |
 | Data freshness | OSM data changes. Plan a periodic re-ingest job (weekly for MVP area). |
