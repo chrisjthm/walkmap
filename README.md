@@ -12,6 +12,37 @@ Walkmap is a web app for planning urban walks and runs optimized for route exper
 
 - Docker Desktop (or Docker Engine + Compose plugin)
 
+### Run tests
+
+Set up virtual environment and install dependencies
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install -r requirements-dev.txt
+```
+
+Run python app tests:
+
+```bash
+cd api
+pytest
+```
+
+Run python app linting:
+
+```bash
+cd api
+ruff check .
+```
+
+Run frontend linting:
+
+```bash
+cd frontend
+npm run lint
+```
+
 ### 1. Configure environment
 
 Create a local env file from the template:
