@@ -138,3 +138,15 @@ To run the A2 verification checks (upgrade, schema checks, constraints, downgrad
 ```bash
 ./scripts/db-verify.sh
 ```
+
+## Running DB Tests
+
+Some tests require a running Postgres/PostGIS instance and will be skipped if
+`DATABASE_URL` is not set. To run the full test suite:
+
+```bash
+docker compose up -d postgres
+export DATABASE_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}
+./scripts/db-migrate.sh
+cd api && pytest
+```
