@@ -6,6 +6,7 @@ type SegmentProperties = {
   segment_id?: string;
   id?: string;
   name?: string;
+  display_name?: string;
   composite_score?: number;
   score?: number;
   verified?: boolean;
@@ -211,7 +212,7 @@ class MockMap {
 
 const buildDetail = (props: SegmentProperties): SegmentDetail => {
   const id = props.segment_id ?? props.id ?? "unknown-segment";
-  const name = props.name ?? "Unnamed segment";
+  const name = props.display_name ?? props.name ?? "Unnamed segment";
   const scoreValue = Number(props.composite_score ?? props.score ?? 0);
   const verified = Boolean(props.verified);
   const ratingCount = Number(props.rating_count ?? 0);
