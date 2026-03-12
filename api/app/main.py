@@ -1,4 +1,5 @@
 import json
+from functools import lru_cache
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
@@ -7,7 +8,11 @@ from sqlalchemy import text
 
 from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, get_engine, ingest_segments
 from app.score_batch import run_batch_scoring
-from app.segments_display import display_name_from_osm_tags, display_name_from_values
+from app.segments_display import (
+    display_name_for_sidewalk,
+    display_name_from_osm_tags,
+    display_name_from_values,
+)
 
 app = FastAPI(title="Walkmap API")
 
@@ -71,38 +76,162 @@ def score_batch(background_tasks: BackgroundTasks) -> dict[str, str]:
     return {"status": "queued"}
 
 
-@app.get("/segments")
-def get_segments(
-    bbox: str = Query(..., description="west,south,east,north"),
+CACHE_DECIMALS = 4
+
+
+@lru_cache(maxsize=256)
+def _get_segments_cached(
+    west: float, south: float, east: float, north: float
 ) -> dict[str, Any]:
-    """Return segments intersecting the bounding box as GeoJSON features."""
-    west, south, east, north = _parse_bbox(bbox)
+    center_lat = (south + north) / 2.0
+    meters_per_degree_lon = 111_320 * abs(
+        __import__("math").cos(__import__("math").radians(center_lat))
+    )
+    meters_per_degree = min(111_320, meters_per_degree_lon or 111_320)
+    near_deg = 20.0 / meters_per_degree
+    near_deg_small = 10.0 / meters_per_degree
+    near_deg_heuristic = 3.0 / meters_per_degree
     engine = get_engine()
     query = text(
         """
-        SELECT
-            id,
-            composite_score,
-            verified,
-            rating_count,
-            vibe_tag_counts,
-            osm_tags->>'name' AS name,
-            osm_tags->>'highway' AS highway,
-            ST_AsGeoJSON(geometry) AS geometry
-        FROM segments
-        WHERE ST_Intersects(
-            geometry,
-            ST_MakeEnvelope(:west, :south, :east, :north, 4326)
+        WITH bbox_segments AS (
+            SELECT
+                id,
+                composite_score,
+                verified,
+                rating_count,
+                vibe_tag_counts,
+                osm_tags,
+                osm_tags->>'name' AS name,
+                osm_tags->>'highway' AS highway,
+                osm_tags->>'footway' AS footway,
+                osm_tags->>'sidewalk:of' AS sidewalk_of,
+                geometry AS geom,
+                ST_LineMerge(geometry) AS geom_line,
+                ST_AsGeoJSON(geometry) AS geometry,
+                CASE
+                    WHEN ST_GeometryType(ST_LineMerge(geometry)) = 'ST_LineString'
+                    THEN ST_Azimuth(
+                        ST_StartPoint(ST_LineMerge(geometry)),
+                        ST_EndPoint(ST_LineMerge(geometry))
+                    )
+                    ELSE NULL
+                END AS azimuth
+            FROM segments
+            WHERE ST_Intersects(
+                geometry,
+                ST_MakeEnvelope(:west, :south, :east, :north, 4326)
+            )
+        ),
+        carriageways AS (
+            SELECT id, name, geom_line AS geom, azimuth
+            FROM bbox_segments
+            WHERE footway IS DISTINCT FROM 'sidewalk'
         )
+        SELECT
+            b.*,
+            (
+                b.footway = 'sidewalk'
+                OR (
+                    b.highway = 'footway'
+                    AND b.name IS NULL
+                    AND (b.footway IS NULL OR b.footway IN ('sidewalk', 'both', 'left', 'right'))
+                )
+                OR b.sidewalk_of IS NOT NULL
+            ) AS is_sidewalk_candidate,
+            CASE
+                WHEN (
+                    b.footway = 'sidewalk'
+                    OR b.sidewalk_of IS NOT NULL
+                    OR (
+                        b.highway = 'footway'
+                        AND b.name IS NULL
+                        AND (b.footway IS NULL OR b.footway IN ('sidewalk', 'both', 'left', 'right'))
+                    )
+                )
+                THEN EXISTS(
+                    SELECT 1
+                    FROM carriageways c
+                    WHERE ST_DWithin(
+                        b.geom_line,
+                        c.geom,
+                        CASE
+                            WHEN b.footway = 'sidewalk' OR b.sidewalk_of IS NOT NULL
+                            THEN :near_deg
+                            ELSE :near_deg_heuristic
+                        END
+                    )
+                      AND (
+                        (
+                            b.azimuth IS NOT NULL
+                            AND c.azimuth IS NOT NULL
+                            AND (
+                                LEAST(
+                                    ABS(DEGREES(b.azimuth - c.azimuth)),
+                                    360 - ABS(DEGREES(b.azimuth - c.azimuth))
+                                ) <= 20
+                                OR
+                                LEAST(
+                                    ABS(DEGREES(b.azimuth - c.azimuth)),
+                                    360 - ABS(DEGREES(b.azimuth - c.azimuth))
+                                ) >= 160
+                            )
+                        )
+                        OR (
+                            b.sidewalk_of IS NOT NULL
+                            AND c.name IS NOT NULL
+                            AND b.sidewalk_of = c.name
+                        )
+                      )
+                )
+                ELSE FALSE
+            END AS suppress,
+            (
+                SELECT s.osm_tags->>'name'
+                FROM segments s
+                WHERE (
+                    b.footway = 'sidewalk'
+                    OR (
+                        b.highway = 'footway'
+                        AND b.name IS NULL
+                        AND (b.footway IS NULL OR b.footway IN ('sidewalk', 'both', 'left', 'right'))
+                    )
+                    OR b.sidewalk_of IS NOT NULL
+                )
+                  AND (s.osm_tags->>'footway') IS DISTINCT FROM 'sidewalk'
+                  AND ST_DWithin(b.geom_line, s.geometry, :near_deg)
+                ORDER BY b.geom_line <-> s.geometry
+                LIMIT 1
+            ) AS nearest_carriageway_name
+        FROM bbox_segments b
         """
     )
     with engine.begin() as connection:
         rows = connection.execute(
-            query, {"west": west, "south": south, "east": east, "north": north}
+            query,
+            {
+                "west": west,
+                "south": south,
+                "east": east,
+                "north": north,
+                "near_deg": near_deg,
+                "near_deg_small": near_deg_small,
+                "near_deg_heuristic": near_deg_heuristic,
+            },
         ).mappings()
         features = []
         for row in rows:
+            if row["is_sidewalk_candidate"] and row["suppress"]:
+                continue
             geometry = json.loads(row["geometry"]) if row["geometry"] else None
+            if row["is_sidewalk_candidate"]:
+                display_name = display_name_for_sidewalk(
+                    row["sidewalk_of"],
+                    row["name"],
+                    row["nearest_carriageway_name"],
+                )
+            else:
+                display_name = display_name_from_values(row["name"], row["highway"])
             features.append(
                 {
                     "type": "Feature",
@@ -113,13 +242,24 @@ def get_segments(
                         "verified": row["verified"],
                         "rating_count": row["rating_count"],
                         "vibe_tag_counts": row["vibe_tag_counts"],
-                        "display_name": display_name_from_values(
-                            row["name"], row["highway"]
-                        ),
+                        "display_name": display_name,
                     },
                 }
             )
     return _feature_collection(features)
+
+
+@app.get("/segments")
+def get_segments(
+    bbox: str = Query(..., description="west,south,east,north"),
+) -> dict[str, Any]:
+    """Return segments intersecting the bounding box as GeoJSON features."""
+    west, south, east, north = _parse_bbox(bbox)
+    west = round(west, CACHE_DECIMALS)
+    south = round(south, CACHE_DECIMALS)
+    east = round(east, CACHE_DECIMALS)
+    north = round(north, CACHE_DECIMALS)
+    return _get_segments_cached(west, south, east, north)
 
 
 @app.get("/segments/{segment_id}")

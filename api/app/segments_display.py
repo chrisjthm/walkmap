@@ -59,3 +59,14 @@ def display_name_from_osm_tags(osm_tags: dict | None) -> str:
     if not osm_tags:
         return "Unnamed segment"
     return display_name_from_values(osm_tags.get("name"), osm_tags.get("highway"))
+
+
+def display_name_for_sidewalk(
+    sidewalk_of: str | None, name: str | None, nearest_carriageway_name: str | None
+) -> str:
+    for candidate in (sidewalk_of, name, nearest_carriageway_name):
+        if candidate:
+            cleaned = str(candidate).strip()
+            if cleaned:
+                return cleaned
+    return "Footway"
