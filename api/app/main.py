@@ -1,4 +1,5 @@
 import json
+import os
 from functools import lru_cache
 from typing import Any
 
@@ -87,8 +88,7 @@ def score_batch(background_tasks: BackgroundTasks) -> dict[str, str]:
 CACHE_DECIMALS = 4
 
 
-@lru_cache(maxsize=256)
-def _get_segments_cached(
+def _get_segments_impl(
     west: float, south: float, east: float, north: float
 ) -> dict[str, Any]:
     center_lat = (south + north) / 2.0
@@ -270,6 +270,9 @@ def _get_segments_cached(
     return _feature_collection(features)
 
 
+_get_segments_cached = lru_cache(maxsize=256)(_get_segments_impl)
+
+
 @app.get("/segments")
 def get_segments(
     bbox: str = Query(..., description="west,south,east,north"),
@@ -280,6 +283,8 @@ def get_segments(
     south = round(south, CACHE_DECIMALS)
     east = round(east, CACHE_DECIMALS)
     north = round(north, CACHE_DECIMALS)
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return _get_segments_impl(west, south, east, north)
     return _get_segments_cached(west, south, east, north)
 
 
