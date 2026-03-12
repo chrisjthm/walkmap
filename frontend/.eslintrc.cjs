@@ -3,7 +3,14 @@ module.exports = {
     browser: true,
     es2021: true,
   },
-  extends: ["eslint:recommended", "plugin:react/recommended", "plugin:react-hooks/recommended"],
+  parser: "@typescript-eslint/parser",
+  extends: [
+    "eslint:recommended",
+    "plugin:react/recommended",
+    "plugin:react-hooks/recommended",
+    "plugin:@typescript-eslint/recommended",
+  ],
+  plugins: ["@typescript-eslint"],
   parserOptions: {
     ecmaVersion: "latest",
     sourceType: "module",
@@ -11,6 +18,18 @@ module.exports = {
       jsx: true,
     },
   },
+  overrides: [
+    {
+      files: ["tests/**/*.ts", "tests/**/*.tsx", "playwright.config.ts"],
+      env: {
+        browser: false,
+        node: true,
+      },
+      rules: {
+        "@typescript-eslint/no-explicit-any": "off",
+      },
+    },
+  ],
   settings: {
     react: {
       version: "detect",

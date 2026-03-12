@@ -1,6 +1,6 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type SegmentProperties = {
   segment_id?: string;
@@ -247,7 +247,7 @@ export default function MapView() {
     [],
   );
 
-  const updateLayerVisibility = (map: maplibregl.Map) => {
+  const updateLayerVisibility = useCallback((map: maplibregl.Map) => {
     const verifiedVisibility = overlayVisible ? "visible" : "none";
     const unverifiedVisibility =
       overlayVisible && !verifiedOnly ? "visible" : "none";
@@ -262,16 +262,16 @@ export default function MapView() {
         unverifiedVisibility,
       );
     }
-  };
+  }, [overlayVisible, verifiedOnly]);
 
-  const updateSource = (map: maplibregl.Map, data: SegmentCollection) => {
+  const updateSource = useCallback((map: maplibregl.Map, data: SegmentCollection) => {
     const source = map.getSource("segments") as maplibregl.GeoJSONSource | undefined;
     if (source) {
       source.setData(data);
     }
-  };
+  }, []);
 
-  const fetchSegments = async (map: maplibregl.Map) => {
+  const fetchSegments = useCallback(async (map: maplibregl.Map) => {
     const bounds = map.getBounds();
     const bbox = [
       bounds.getWest(),
@@ -297,9 +297,9 @@ export default function MapView() {
     } catch (error) {
       setSegmentsError(true);
     }
-  };
+  }, [apiBase, updateSource]);
 
-  const fetchSegmentDetail = async (feature: SegmentFeature) => {
+  const fetchSegmentDetail = useCallback(async (feature: SegmentFeature) => {
     const fallbackDetail = buildDetail(feature.properties);
     const id = fallbackDetail.id;
     const url = apiBase ? `${apiBase}/segments/${id}` : `/segments/${id}`;
@@ -314,7 +314,7 @@ export default function MapView() {
     } catch (error) {
       setSelectedDetail(fallbackDetail);
     }
-  };
+  }, [apiBase]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -482,14 +482,14 @@ export default function MapView() {
           .__walkmap__;
       }
     };
-  }, [apiBase, styleUrl]);
+  }, [apiBase, fetchSegmentDetail, fetchSegments, styleUrl, updateLayerVisibility]);
 
   useEffect(() => {
     if (!mapRef.current) {
       return;
     }
     updateLayerVisibility(mapRef.current);
-  }, [overlayVisible, verifiedOnly]);
+  }, [updateLayerVisibility]);
 
   return (
     <>
