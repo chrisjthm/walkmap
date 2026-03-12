@@ -64,6 +64,33 @@ def _insert_segment(
     )
 
 
+def _insert_park(db_connection, park_id: str, wkt: str, name: str | None = None) -> None:
+    db_connection.execute(
+        text(
+            """
+            INSERT INTO parks (
+                id,
+                name,
+                geometry,
+                osm_tags
+            )
+            VALUES (
+                :id,
+                :name,
+                ST_GeomFromText(:wkt, 4326),
+                CAST(:osm_tags AS jsonb)
+            )
+            """
+        ),
+        {
+            "id": park_id,
+            "name": name,
+            "wkt": wkt,
+            "osm_tags": json.dumps({"leisure": "park", "name": name} if name else {"leisure": "park"}),
+        },
+    )
+
+
 def _client() -> TestClient:
     return TestClient(app)
 
@@ -303,6 +330,36 @@ def test_segments_bbox_sidewalk_inherits_name_when_parent_outside_bbox(db_connec
     feature = payload["features"][0]
     assert feature["properties"]["segment_id"] == "seg-morris-sidewalk"
     assert feature["properties"]["display_name"] == "Morris Street"
+
+
+def test_segments_bbox_does_not_suppress_park_paths(db_connection) -> None:
+    _insert_park(
+        db_connection,
+        "park-mary-benson",
+        "POLYGON((-74.04005 40.7158, -74.03995 40.7158, -74.03995 40.7168, -74.04005 40.7168, -74.04005 40.7158))",
+        name="Mary Benson Park",
+    )
+    _insert_segment(
+        db_connection,
+        "seg-park-path",
+        "LINESTRING(-74.0400 40.7159, -74.0400 40.7167)",
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "seg-park-street",
+        "LINESTRING(-74.04002 40.7159, -74.04002 40.7167)",
+        osm_tags={"highway": "residential", "name": "Park Edge"},
+    )
+    db_connection.commit()
+
+    client = _client()
+    response = client.get("/segments?bbox=-74.0402,40.7157,-74.0398,40.7169")
+
+    assert response.status_code == 200
+    payload = response.json()
+    feature_ids = {feature["properties"]["segment_id"] for feature in payload["features"]}
+    assert "seg-park-path" in feature_ids
 
 
 def test_segments_bbox_query_uses_gist_index(db_connection) -> None:

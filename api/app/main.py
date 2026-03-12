@@ -6,7 +6,14 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, get_engine, ingest_segments
+from app.ingest import (
+    DEFAULT_BBOX,
+    BoundingBox,
+    OSMDataProvider,
+    get_engine,
+    ingest_parks,
+    ingest_segments,
+)
 from app.score_batch import run_batch_scoring
 from app.segments_display import (
     display_name_for_sidewalk,
@@ -62,6 +69,7 @@ def ingest_osm(background_tasks: BackgroundTasks) -> dict[str, str | dict[str, f
     bbox = BoundingBox(**DEFAULT_BBOX)
     provider = OSMDataProvider()
     background_tasks.add_task(ingest_segments, bbox, provider)
+    background_tasks.add_task(ingest_parks, bbox, provider)
     return {"status": "queued", "bbox": DEFAULT_BBOX}
 
 
@@ -123,6 +131,14 @@ def _get_segments_cached(
                 ST_MakeEnvelope(:west, :south, :east, :north, 4326)
             )
         ),
+        parks_in_bbox AS (
+            SELECT geometry
+            FROM parks
+            WHERE ST_Intersects(
+                geometry,
+                ST_MakeEnvelope(:west, :south, :east, :north, 4326)
+            )
+        ),
         carriageways AS (
             SELECT id, name, geom_line AS geom, azimuth
             FROM bbox_segments
@@ -139,6 +155,11 @@ def _get_segments_cached(
                 )
                 OR b.sidewalk_of IS NOT NULL
             ) AS is_sidewalk_candidate,
+            EXISTS(
+                SELECT 1
+                FROM parks_in_bbox p
+                WHERE ST_Intersects(b.geom_line, p.geometry)
+            ) AS in_park,
             CASE
                 WHEN (
                     b.footway = 'sidewalk'
@@ -221,7 +242,7 @@ def _get_segments_cached(
         ).mappings()
         features = []
         for row in rows:
-            if row["is_sidewalk_candidate"] and row["suppress"]:
+            if row["is_sidewalk_candidate"] and row["suppress"] and not row["in_park"]:
                 continue
             geometry = json.loads(row["geometry"]) if row["geometry"] else None
             if row["is_sidewalk_candidate"]:
