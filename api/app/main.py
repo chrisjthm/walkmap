@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, get_engine, ingest_segments
 from app.score_batch import run_batch_scoring
+from app.segments_display import display_name_from_osm_tags, display_name_from_values
 
 app = FastAPI(title="Walkmap API")
 
@@ -37,7 +38,6 @@ def _parse_bbox(value: str) -> tuple[float, float, float, float]:
 
 def _feature_collection(features: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "FeatureCollection", "features": features}
-
 
 @app.get("/health")
 def health() -> dict[str, str]:
@@ -86,6 +86,8 @@ def get_segments(
             verified,
             rating_count,
             vibe_tag_counts,
+            osm_tags->>'name' AS name,
+            osm_tags->>'highway' AS highway,
             ST_AsGeoJSON(geometry) AS geometry
         FROM segments
         WHERE ST_Intersects(
@@ -111,6 +113,9 @@ def get_segments(
                         "verified": row["verified"],
                         "rating_count": row["rating_count"],
                         "vibe_tag_counts": row["vibe_tag_counts"],
+                        "display_name": display_name_from_values(
+                            row["name"], row["highway"]
+                        ),
                     },
                 }
             )
@@ -156,4 +161,5 @@ def get_segment_detail(segment_id: str) -> dict[str, Any]:
         "rating_count": row["rating_count"],
         "vibe_tag_counts": row["vibe_tag_counts"],
         "osm_tags": row["osm_tags"],
+        "display_name": display_name_from_osm_tags(row["osm_tags"]),
     }

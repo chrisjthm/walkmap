@@ -96,6 +96,7 @@ def test_segments_bbox_returns_expected_segment(db_connection) -> None:
     assert "verified" in props
     assert "rating_count" in props
     assert "vibe_tag_counts" in props
+    assert "display_name" in props
 
 
 def test_segments_bbox_empty_returns_empty_collection(db_connection) -> None:
@@ -159,6 +160,7 @@ def test_segment_detail_endpoint_returns_full_detail(db_connection) -> None:
     assert payload["ai_score"] == 61
     assert payload["ai_confidence"] == 0.42
     assert payload["osm_tags"]["highway"] == "footway"
+    assert payload["display_name"] == "Footway"
     assert "geometry" in payload
     assert payload["geometry"]["type"] == "LineString"
 
@@ -189,6 +191,60 @@ def test_segments_response_is_valid_geojson(db_connection) -> None:
     assert feature["type"] == "Feature"
     assert feature["geometry"]["type"] == "LineString"
     assert isinstance(feature["geometry"]["coordinates"], list)
+
+
+def test_segments_bbox_display_name_prefers_osm_name(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "seg-named",
+        "LINESTRING(-74.0410 40.7155, -74.0390 40.7165)",
+        osm_tags={"name": "Grove Street", "highway": "residential"},
+    )
+    db_connection.commit()
+
+    client = _client()
+    response = client.get("/segments?bbox=-74.05,40.71,-74.03,40.72")
+
+    assert response.status_code == 200
+    payload = response.json()
+    feature = payload["features"][0]
+    assert feature["properties"]["display_name"] == "Grove Street"
+
+
+def test_segments_bbox_display_name_falls_back_to_highway(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "seg-footway",
+        "LINESTRING(-74.0410 40.7155, -74.0390 40.7165)",
+        osm_tags={"highway": "footway"},
+    )
+    db_connection.commit()
+
+    client = _client()
+    response = client.get("/segments?bbox=-74.05,40.71,-74.03,40.72")
+
+    assert response.status_code == 200
+    payload = response.json()
+    feature = payload["features"][0]
+    assert feature["properties"]["display_name"] == "Footway"
+
+
+def test_segments_bbox_display_name_handles_multiple_highway_tags(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "seg-multi-highway",
+        "LINESTRING(-74.0410 40.7155, -74.0390 40.7165)",
+        osm_tags={"highway": ["path", "footway"]},
+    )
+    db_connection.commit()
+
+    client = _client()
+    response = client.get("/segments?bbox=-74.05,40.71,-74.03,40.72")
+
+    assert response.status_code == 200
+    payload = response.json()
+    feature = payload["features"][0]
+    assert feature["properties"]["display_name"] == "Footway"
 
 
 def test_segments_bbox_query_uses_gist_index(db_connection) -> None:
