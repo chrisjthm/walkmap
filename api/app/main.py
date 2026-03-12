@@ -4,8 +4,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from sqlalchemy import text
 
-from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, ingest_segments
-from app.ingest import get_engine
+from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, get_engine, ingest_segments
 from app.score_batch import run_batch_scoring
 
 app = FastAPI(title="Walkmap API")
