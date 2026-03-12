@@ -1,9 +1,30 @@
-from fastapi import BackgroundTasks, FastAPI
+import json
+from typing import Any
 
-from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, ingest_segments
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from sqlalchemy import text
+
+from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, get_engine, ingest_segments
 from app.score_batch import run_batch_scoring
 
 app = FastAPI(title="Walkmap API")
+
+
+def _parse_bbox(value: str) -> tuple[float, float, float, float]:
+    parts = [item.strip() for item in value.split(",")]
+    if len(parts) != 4:
+        raise HTTPException(status_code=400, detail="bbox must be west,south,east,north")
+    try:
+        west, south, east, north = (float(part) for part in parts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="bbox must be four numbers") from exc
+    if west >= east or south >= north:
+        raise HTTPException(status_code=400, detail="bbox coordinates are invalid")
+    return west, south, east, north
+
+
+def _feature_collection(features: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"type": "FeatureCollection", "features": features}
 
 
 @app.get("/health")
@@ -36,3 +57,91 @@ def score_batch(background_tasks: BackgroundTasks) -> dict[str, str]:
     """
     background_tasks.add_task(run_batch_scoring)
     return {"status": "queued"}
+
+
+@app.get("/segments")
+def get_segments(
+    bbox: str = Query(..., description="west,south,east,north"),
+) -> dict[str, Any]:
+    """Return segments intersecting the bounding box as GeoJSON features."""
+    west, south, east, north = _parse_bbox(bbox)
+    engine = get_engine()
+    query = text(
+        """
+        SELECT
+            id,
+            composite_score,
+            verified,
+            rating_count,
+            vibe_tag_counts,
+            ST_AsGeoJSON(geometry) AS geometry
+        FROM segments
+        WHERE ST_Intersects(
+            geometry,
+            ST_MakeEnvelope(:west, :south, :east, :north, 4326)
+        )
+        """
+    )
+    with engine.begin() as connection:
+        rows = connection.execute(
+            query, {"west": west, "south": south, "east": east, "north": north}
+        ).mappings()
+        features = []
+        for row in rows:
+            geometry = json.loads(row["geometry"]) if row["geometry"] else None
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": geometry,
+                    "properties": {
+                        "segment_id": row["id"],
+                        "composite_score": row["composite_score"],
+                        "verified": row["verified"],
+                        "rating_count": row["rating_count"],
+                        "vibe_tag_counts": row["vibe_tag_counts"],
+                    },
+                }
+            )
+    return _feature_collection(features)
+
+
+@app.get("/segments/{segment_id}")
+def get_segment_detail(segment_id: str) -> dict[str, Any]:
+    """Return full detail for a single segment."""
+    engine = get_engine()
+    query = text(
+        """
+        SELECT
+            id,
+            ai_score,
+            ai_confidence,
+            user_score,
+            composite_score,
+            verified,
+            rating_count,
+            vibe_tag_counts,
+            osm_tags,
+            ST_AsGeoJSON(geometry) AS geometry
+        FROM segments
+        WHERE id = :segment_id
+        """
+    )
+    with engine.begin() as connection:
+        row = (
+            connection.execute(query, {"segment_id": segment_id}).mappings().first()
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="segment not found")
+    geometry = json.loads(row["geometry"]) if row["geometry"] else None
+    return {
+        "segment_id": row["id"],
+        "geometry": geometry,
+        "ai_score": row["ai_score"],
+        "ai_confidence": row["ai_confidence"],
+        "user_score": row["user_score"],
+        "composite_score": row["composite_score"],
+        "verified": row["verified"],
+        "rating_count": row["rating_count"],
+        "vibe_tag_counts": row["vibe_tag_counts"],
+        "osm_tags": row["osm_tags"],
+    }
