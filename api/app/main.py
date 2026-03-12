@@ -143,6 +143,7 @@ def _get_segments_impl(
             SELECT id, name, geom_line AS geom, azimuth
             FROM bbox_segments
             WHERE footway IS DISTINCT FROM 'sidewalk'
+              AND highway IS DISTINCT FROM 'footway'
         )
         SELECT
             b.*,
@@ -220,6 +221,7 @@ def _get_segments_impl(
                     OR b.sidewalk_of IS NOT NULL
                 )
                   AND (s.osm_tags->>'footway') IS DISTINCT FROM 'sidewalk'
+                  AND (s.osm_tags->>'highway') IS DISTINCT FROM 'footway'
                   AND ST_DWithin(b.geom_line, s.geometry, :near_deg)
                 ORDER BY b.geom_line <-> s.geometry
                 LIMIT 1
