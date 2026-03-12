@@ -436,7 +436,7 @@ export default function MapView() {
     const handleClick = (event: maplibregl.MapLayerMouseEvent) => {
       const features = map.queryRenderedFeatures(event.point, {
         layers: ["segments-verified", "segments-unverified"],
-      }) as SegmentFeature[];
+      }) as unknown as SegmentFeature[];
 
       if (!features.length) {
         return;
