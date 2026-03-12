@@ -36,64 +36,9 @@ type SegmentDetail = {
   vibeTags: Array<[string, number]>;
 };
 
-const FALLBACK_SEGMENTS: SegmentCollection = {
+const EMPTY_SEGMENTS: SegmentCollection = {
   type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [-74.0415, 40.716],
-          [-74.036, 40.7206],
-        ],
-      },
-      properties: {
-        segment_id: "mock-hudson-01",
-        name: "Hudson Promenade",
-        composite_score: 87,
-        verified: true,
-        rating_count: 18,
-        vibe_tag_counts: { waterfront: 10, scenic: 6, breezy: 4 },
-      },
-    },
-    {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [-74.0492, 40.7188],
-          [-74.045, 40.722],
-        ],
-      },
-      properties: {
-        segment_id: "mock-grove-02",
-        name: "Grove Street",
-        composite_score: 62,
-        verified: false,
-        rating_count: 4,
-        vibe_tag_counts: { cafes: 3, lively: 2 },
-      },
-    },
-    {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [-74.033, 40.7115],
-          [-74.028, 40.714],
-        ],
-      },
-      properties: {
-        segment_id: "mock-liberty-03",
-        name: "Liberty State Park",
-        composite_score: 74,
-        verified: true,
-        rating_count: 9,
-        vibe_tag_counts: { parks: 5, quiet: 3 },
-      },
-    },
-  ],
+  features: [],
 };
 
 const SCORE_COLOR_EXPRESSION = [
@@ -124,6 +69,146 @@ const getApiBase = () => {
   return rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
 };
 
+type MapEventHandler = (event: { point: { x: number; y: number } }) => void;
+
+type MapHandlerEntry = {
+  layerId?: string;
+  handler: MapEventHandler;
+};
+
+type MapSourceData = SegmentCollection;
+
+type MockSource = {
+  _data: MapSourceData;
+  setData: (data: MapSourceData) => void;
+};
+
+class MockMap {
+  public __isMock = true;
+  private container: HTMLDivElement;
+  private handlers: Record<string, MapHandlerEntry[]> = {};
+  private sources = new Map<string, MockSource>();
+  private layers = new Map<string, { layout: Record<string, unknown> }>();
+  private bounds = {
+    getWest: () => -74.06,
+    getSouth: () => 40.708,
+    getEast: () => -74.015,
+    getNorth: () => 40.7282,
+  };
+
+  constructor(container: HTMLDivElement) {
+    this.container = container;
+    window.setTimeout(() => {
+      this.emit("load");
+    }, 0);
+  }
+
+  addControl() {
+    return undefined;
+  }
+
+  on(event: string, layerOrHandler: string | MapEventHandler, handler?: MapEventHandler) {
+    const entry: MapHandlerEntry =
+      typeof layerOrHandler === "string"
+        ? { layerId: layerOrHandler, handler: handler as MapEventHandler }
+        : { handler: layerOrHandler };
+    const list = this.handlers[event] ?? [];
+    list.push(entry);
+    this.handlers[event] = list;
+  }
+
+  off(event: string, layerOrHandler: string | MapEventHandler, handler?: MapEventHandler) {
+    const list = this.handlers[event];
+    if (!list) {
+      return;
+    }
+    const target =
+      typeof layerOrHandler === "string"
+        ? handler
+        : layerOrHandler;
+    this.handlers[event] = list.filter((entry) => entry.handler !== target);
+  }
+
+  emit(event: string, point: { x: number; y: number } = { x: 0, y: 0 }) {
+    const list = this.handlers[event] ?? [];
+    list.forEach((entry) => entry.handler({ point }));
+  }
+
+  addSource(id: string, source: { type: "geojson"; data: MapSourceData }) {
+    const stored: MockSource = {
+      _data: source.data,
+      setData: (data) => {
+        stored._data = data;
+      },
+    };
+    this.sources.set(id, stored);
+  }
+
+  getSource(id: string) {
+    return this.sources.get(id);
+  }
+
+  addLayer(layer: { id: string; layout?: Record<string, unknown> }) {
+    this.layers.set(layer.id, { layout: layer.layout ?? {} });
+  }
+
+  getLayer(id: string) {
+    return this.layers.get(id);
+  }
+
+  setLayoutProperty(id: string, property: string, value: unknown) {
+    const layer = this.layers.get(id);
+    if (layer) {
+      layer.layout[property] = value;
+    }
+  }
+
+  getLayoutProperty(id: string, property: string) {
+    const layer = this.layers.get(id);
+    return layer?.layout[property] ?? "visible";
+  }
+
+  getBounds() {
+    return this.bounds;
+  }
+
+  queryRenderedFeatures() {
+    const source = this.sources.get("segments");
+    return source?._data.features ?? [];
+  }
+
+  project() {
+    const rect = this.container.getBoundingClientRect();
+    return { x: rect.width / 2, y: rect.height / 2 };
+  }
+
+  panBy() {
+    this.emit("moveend");
+  }
+
+  getCanvas() {
+    return this.container;
+  }
+
+  getContainer() {
+    return this.container;
+  }
+
+  isStyleLoaded() {
+    return true;
+  }
+
+  remove() {
+    this.handlers = {};
+    this.sources.clear();
+    this.layers.clear();
+  }
+
+  __triggerClick(point: { x: number; y: number }) {
+    this.emit("click", point);
+  }
+}
+
 const buildDetail = (props: SegmentProperties): SegmentDetail => {
   const id = props.segment_id ?? props.id ?? "unknown-segment";
   const name = props.name ?? "Unnamed segment";
@@ -152,7 +237,7 @@ export default function MapView() {
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<SegmentDetail | null>(null);
-  const [usingFallback, setUsingFallback] = useState(false);
+  const [segmentsError, setSegmentsError] = useState(false);
 
   const apiBase = useMemo(() => getApiBase(), []);
   const styleUrl = useMemo(
@@ -207,11 +292,10 @@ export default function MapView() {
         throw new Error("Failed to load segments");
       }
       const data = (await response.json()) as SegmentCollection;
-      setUsingFallback(false);
+      setSegmentsError(false);
       updateSource(map, data);
     } catch (error) {
-      setUsingFallback(true);
-      updateSource(map, FALLBACK_SEGMENTS);
+      setSegmentsError(true);
     }
   };
 
@@ -237,24 +321,65 @@ export default function MapView() {
       return;
     }
 
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: styleUrl,
-      center: JERSEY_CITY_CENTER,
-      zoom: 13.4,
-      pitch: 36,
-      bearing: -18,
-    });
+    if (import.meta.env.VITE_E2E === "true") {
+      (window as Window & {
+        __walkmap__?: { map?: maplibregl.Map; ready?: boolean; error?: string };
+      }).__walkmap__ = {
+        ready: false,
+      };
+    }
+
+    let map: maplibregl.Map;
+    try {
+      if (import.meta.env.VITE_E2E_MOCK_MAP === "true") {
+        map = new MockMap(mapContainerRef.current) as unknown as maplibregl.Map;
+      } else {
+        map = new maplibregl.Map({
+          container: mapContainerRef.current,
+          style: styleUrl,
+          center: JERSEY_CITY_CENTER,
+          zoom: 13.4,
+          pitch: 36,
+          bearing: -18,
+        });
+      }
+    } catch (error) {
+      if (import.meta.env.VITE_E2E === "true") {
+        const testHook = (window as Window & {
+          __walkmap__?: { map?: maplibregl.Map; ready?: boolean; error?: string };
+        }).__walkmap__;
+        if (testHook) {
+          testHook.error = String(error ?? "failed to create map");
+        }
+      }
+      return;
+    }
 
     mapRef.current = map;
+    if (import.meta.env.VITE_E2E === "true") {
+      (window as Window & {
+        __walkmap__?: { map: maplibregl.Map; ready?: boolean; error?: string };
+      }).__walkmap__ = {
+        map,
+        ready: false,
+      };
+    }
 
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
 
     map.on("load", () => {
+      if (import.meta.env.VITE_E2E === "true") {
+        const testHook = (window as Window & {
+          __walkmap__?: { map: maplibregl.Map; ready?: boolean; error?: string };
+        }).__walkmap__;
+        if (testHook) {
+          testHook.ready = true;
+        }
+      }
       if (!map.getSource("segments")) {
         map.addSource("segments", {
           type: "geojson",
-          data: FALLBACK_SEGMENTS,
+          data: EMPTY_SEGMENTS,
         });
       }
 
@@ -336,11 +461,26 @@ export default function MapView() {
     map.on("mouseenter", "segments-unverified", handleEnter);
     map.on("mouseleave", "segments-unverified", handleLeave);
 
+    map.on("error", (event) => {
+      if (import.meta.env.VITE_E2E === "true") {
+        const testHook = (window as Window & {
+          __walkmap__?: { map: maplibregl.Map; ready?: boolean; error?: string };
+        }).__walkmap__;
+        if (testHook) {
+          testHook.error = String(event.error ?? "unknown map error");
+        }
+      }
+    });
+
     return () => {
       map.off("click", "segments-verified", handleClick);
       map.off("click", "segments-unverified", handleClick);
       map.remove();
       mapRef.current = null;
+      if (import.meta.env.VITE_E2E === "true") {
+        delete (window as Window & { __walkmap__?: { map: maplibregl.Map } })
+          .__walkmap__;
+      }
     };
   }, [apiBase, styleUrl]);
 
@@ -371,9 +511,9 @@ export default function MapView() {
               ? "Segment scores visible across the current viewport."
               : "Overlay hidden. Toggle it back on to view segment scores."}
           </p>
-          {usingFallback && (
+          {segmentsError && (
             <p className="mt-2 text-xs uppercase tracking-[0.2em] text-sun">
-              Mock data (API offline)
+              Unable to load segments from the API.
             </p>
           )}
         </div>

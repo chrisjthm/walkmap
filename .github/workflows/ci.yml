@@ -50,9 +50,15 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps
       - name: Run vitest
         working-directory: frontend
         run: npm run test
+      - name: Run Playwright E2E
+        working-directory: frontend
+        run: npm run test:e2e
       - name: Run typecheck
         working-directory: frontend
         run: npm run typecheck

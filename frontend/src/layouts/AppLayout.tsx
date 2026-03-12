@@ -69,8 +69,8 @@ export default function AppLayout() {
 
           <section className="panel-section">
             <p className="text-sm text-moss">
-              Status: Mock data wired. Map overlay and routing engine will
-              integrate once API endpoints land.
+              Status: Segments are live from the API. Route planning integrations
+              are next.
             </p>
           </section>
         </div>

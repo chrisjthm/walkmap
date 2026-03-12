@@ -2,12 +2,24 @@ import json
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.ingest import DEFAULT_BBOX, BoundingBox, OSMDataProvider, get_engine, ingest_segments
 from app.score_batch import run_batch_scoring
 
 app = FastAPI(title="Walkmap API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _parse_bbox(value: str) -> tuple[float, float, float, float]:
