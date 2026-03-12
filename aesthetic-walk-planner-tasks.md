@@ -482,7 +482,9 @@ Preference for segments adjacent to already-verified high-scoring segments is im
 ### E1 — Project Setup & Base Layout
 
 **Description:**
-Initialize the React + TypeScript frontend with Vite. Configure Tailwind CSS, React Query, and React Router. Establish the base layout: a full-screen map area with a collapsible side panel.
+Initialize the React + TypeScript frontend with Vite. Set up Tailwind CSS, React Query, and React Router. Establish the base layout: a full-screen map area with a collapsible side panel.
+
+Install MapLibre GL JS (`maplibre-gl`) instead of Mapbox. No API key or account required. Configure the tile source in a single constants file so it can be swapped later without touching component code.
 
 Routes:
 - `/` — map view (default)
@@ -494,46 +496,50 @@ Routes:
 - `npm run dev` starts without errors
 - `npm run typecheck` (`tsc --noEmit`) passes with zero errors in strict mode
 - Tailwind classes apply correctly in the browser
+- MapLibre GL JS is installed and the tile URL constant is defined (e.g. `TILE_URL = "https://tiles.openfreemap.org/styles/liberty"`)
 - Base layout renders: full-screen map area + side panel visible on `/plan`
 
 **Test cases:**
 1. `npm run dev` → loads at localhost:5173 with no console errors
 2. `npm run typecheck` → zero TypeScript errors
-3. Navigate to `/plan` → side panel renders (can be a placeholder component for now)
+3. Navigate to `/plan` → side panel renders
 4. Navigate to `/explore` → explore panel renders
-5. Side panel is collapsible: clicking a toggle hides/shows it without breaking the map layout
+5. Side panel is collapsible: toggle hides/shows it without breaking the map layout
+6. No Mapbox token or environment variable is required anywhere in the codebase
 
 ---
 
 ### E2 — Map View & Aesthetic Overlay
 
 **Description:**
-Implement the map view using Mapbox GL JS. Street segments are rendered as a colored line layer sourced from `GET /segments?bbox=...`.
+Implement the map view using MapLibre GL JS with OpenFreeMap tiles. Street segments are rendered as a colored line layer sourced from `GET /segments?bbox=...`.
 
 Implementation notes:
+- Initialize the map with `new maplibregl.Map({ style: TILE_URL, ... })` — no token needed
 - Fetch segments on map load and on `moveend` event (debounced 300ms)
-- Render as a Mapbox GeoJSON source + `line` layer
-- Color expression: Mapbox `interpolate` expression mapping score 0–100 to the gradient in spec Section 4.3
+- Add segments as a MapLibre GeoJSON source, then a `line` layer on top
+- Color expression: MapLibre `interpolate` expression (identical syntax to Mapbox) mapping score 0–100 to the gradient in spec Section 4.3
 - Unverified segments: `line-dasharray: [2, 2]`
 - Verified segments: solid line
-- Clicking a segment: opens a detail panel showing name, score, verification badge, vibe tag counts, rating count
+- Clicking a segment: use MapLibre's `map.on('click', layerId, ...)` to open a detail panel showing name, score, verification badge, vibe tag counts, rating count
 - Toggle: show/hide overlay; show verified-only
 
 **Completion criteria:**
+- Map renders with OpenFreeMap tiles without any API key or token
 - All segments in the current viewport render with the correct gradient color
-- Unverified segments visually distinct (dashed)
-- Segment click opens detail panel with correct data pulled from `GET /segments/{id}`
-- Overlay re-fetches on pan/zoom with debounce
+- Unverified segments visually distinct (dashed), verified segments solid
+- Segment click opens detail panel with correct data from `GET /segments/{id}`
+- Overlay re-fetches on pan/zoom with 300ms debounce
 - Toggle buttons correctly show/hide overlay and filter to verified-only
 
 **Test cases:**
-1. Load app over Jersey City waterfront → colored segment lines visible
+1. Load app over Jersey City waterfront → base map tiles render, colored segment lines visible
 2. A segment with score 85 renders deep green; a segment with score 15 renders red
-3. An unverified segment renders with a dashed line; a verified segment renders solid
-4. Click a segment → detail panel appears with `segment_id`, score, `verified` badge, vibe tags
-5. Toggle overlay off → all colored lines disappear; toggle on → reappear
+3. An unverified segment renders dashed; a verified segment renders solid
+4. Click a segment → detail panel appears with score, verified badge, and vibe tags
+5. Toggle overlay off → colored lines disappear; toggle on → reappear
 6. Pan map 500m → new segments load in the new viewport (confirmed via Network tab)
-
+7. No requests to any Mapbox domain appear in the Network tab
 ---
 
 ### E3 — Route Planner UI
