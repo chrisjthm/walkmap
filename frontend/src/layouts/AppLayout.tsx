@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
+import MapView from "../components/MapView";
 
 const PANEL_ROUTES = new Set(["/plan", "/explore", "/login", "/register"]);
 
@@ -68,32 +69,15 @@ export default function AppLayout() {
 
           <section className="panel-section">
             <p className="text-sm text-moss">
-              Status: Mock data wired. Map overlay and routing engine will
-              integrate once API endpoints land.
+              Status: Segments are live from the API. Route planning integrations
+              are next.
             </p>
           </section>
         </div>
       </aside>
 
       <section className="map-shell">
-        <div className="map-surface" aria-hidden="true" />
-        <div className="map-overlay">
-          <div className="map-badge">Live Map Placeholder</div>
-          <div>
-            <p className="map-label">
-              A layered canvas for aesthetic walks, tuned to every block.
-            </p>
-          </div>
-          <div className="map-card">
-            <p className="text-sm uppercase tracking-[0.2em] text-sun">
-              Next step
-            </p>
-            <p className="mt-2 text-sm text-mist">
-              E2 adds Mapbox GL, score gradients, and tappable segment details.
-            </p>
-          </div>
-        </div>
-
+        <MapView />
         {!panelOpen && (
           <button
             className="panel-toggle"

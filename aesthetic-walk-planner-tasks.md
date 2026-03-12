@@ -204,6 +204,173 @@ Also implement `update_composite_score()` which applies the blending formula fro
 
 ---
 
+### B2.1 — Scoring: Waterfront Proximity Gradient
+
+**Description:**
+Replace the binary waterfront proximity check with a distance-band gradient. Query `ST_Distance` from the segment midpoint to the nearest `natural=water`, `waterway=*`, or `leisure=marina` feature in the OSM data. Apply a tiered bonus:
+
+| Distance to water | Score bonus |
+|---|---|
+| 0–50m | +25 |
+| 51–150m | +15 |
+| 151–300m | +5 |
+| > 300m | 0 |
+
+The Hudson River promenade in Jersey City should be the clearest beneficiary — segments directly on the waterfront path should score noticeably higher than inland streets.
+
+**Completion criteria:**
+- Three distinct score tiers are visible on the map along the waterfront → inland gradient
+- The Hudson River promenade segments score > 75
+- Segments 2+ blocks inland from the waterfront receive no waterfront bonus
+
+**Test cases:**
+1. Score a mock segment with midpoint 30m from water → bonus of +25 applied
+2. Score a mock segment 200m from water → bonus of +5 applied
+3. Score a mock segment 500m from water → no bonus
+4. After re-running B3, verify in DB: `SELECT AVG(ai_score) FROM segments WHERE ST_DWithin(geometry, <hudson_river_geom>, 50)` is > 75
+5. Visual check: waterfront promenade is clearly greener than one block inland on the map
+
+---
+
+### B2.2 — Scoring: POI Density Gradient
+
+**Description:**
+Replace the flat POI proximity bonus with a tiered count-based score. Count OSM POIs (restaurants, cafes, bars, shops, amenities) within 50m of the segment midpoint and apply progressive bonuses:
+
+| POI count within 50m | Score bonus |
+|---|---|
+| 0 | 0 |
+| 1–3 | +8 |
+| 4–8 | +16 |
+| 9+ | +22 |
+
+Cap the bonus at +22 to avoid over-rewarding extremely dense commercial corridors at the expense of all other factors.
+
+**Completion criteria:**
+- Grove Street and Newark Avenue (dense commercial) score measurably higher than adjacent residential blocks
+- The bonus never exceeds +22 regardless of POI count
+- Purely residential blocks with 0 POIs receive no POI bonus
+
+**Test cases:**
+1. `score_segment(..., nearby_pois=[])` → POI bonus = 0
+2. `score_segment(..., nearby_pois=[p1, p2])` → POI bonus = +8
+3. `score_segment(..., nearby_pois=[p1..p6])` → POI bonus = +16
+4. `score_segment(..., nearby_pois=[p1..p15])` → POI bonus capped at +22
+5. After re-running B3: Grove Street corridor segments average > 10 points higher than the nearest purely residential block
+
+---
+
+### B2.3 — Scoring: Residential Street Refinement
+
+**Description:**
+Currently all `highway=residential` segments score the same. Add sub-classification logic that penalizes residential streets with high-traffic characteristics:
+
+- `oneway=yes` on a residential street → -8 (indicates higher vehicle throughput)
+- `maxspeed > 25mph` (or `> 40kph`) → -10
+- `lanes >= 2` → -8
+- `highway=secondary` or `highway=tertiary` without sidewalk tags → -12
+- `highway=living_street` (shared pedestrian/vehicle space) → +10 bonus
+
+These modifiers stack but are capped: total penalty cannot exceed -20, total bonus cannot exceed +10 for this factor.
+
+**Completion criteria:**
+- A `highway=living_street` scores at least 10 points higher than an equivalent `highway=residential`
+- A one-way residential street scores lower than an otherwise identical two-way residential street
+- Multi-lane secondary streets without sidewalks score below 40
+
+**Test cases:**
+1. `score_segment({"highway": "residential", "oneway": "yes"}, ...)` scores lower than `score_segment({"highway": "residential"}, ...)` by ~8 points
+2. `score_segment({"highway": "living_street"}, ...)` scores > 10 points higher than equivalent `highway=residential`
+3. `score_segment({"highway": "secondary", "lanes": "2"}, ...)` with no sidewalk tag → score < 40
+4. Stack two penalties: `oneway=yes` + `maxspeed=45` → total penalty = -18 (not -20, since cap applies)
+5. After re-running B3: standard deviation of `ai_score` across all segments > 15
+
+---
+
+### B2.4 — Scoring: Park Adjacency Distance Bands
+
+**Description:**
+Replace the binary park proximity check with a distance gradient using `ST_Distance` from the segment midpoint to the nearest `leisure=park`, `leisure=playground`, or `landuse=grass` polygon:
+
+| Distance to park | Score bonus |
+|---|---|
+| 0–20m | +18 |
+| 21–75m | +10 |
+| 76–150m | +4 |
+| > 150m | 0 |
+
+**Completion criteria:**
+- Segments bordering a park edge score noticeably higher than segments one block away from the same park
+- Hamilton Park and Van Vorst Park perimeter segments score > 70
+
+**Test cases:**
+1. Mock segment midpoint 10m from a park polygon → bonus = +18
+2. Mock segment midpoint 50m from a park → bonus = +10
+3. Mock segment midpoint 120m from a park → bonus = +4
+4. Mock segment midpoint 200m from a park → bonus = 0
+5. After re-running B3: segments directly bordering Hamilton Park average > 70
+
+---
+
+### B2.5 — Scoring: Intersection Density
+
+**Description:**
+Use the pedestrian graph structure (already built in D1) to compute a pedestrian interest score based on block length. Shorter blocks with more intersections create more interesting, navigable walks. Derive this from the segment's `distance_m`:
+
+| Segment length | Score modifier |
+|---|---|
+| < 60m (very short block) | +8 |
+| 60–120m (short block) | +4 |
+| 121–250m (typical block) | 0 |
+| > 250m (long block) | -6 |
+| > 400m (very long block, highway-like) | -12 |
+
+`distance_m` is already available on every segment from the OSMnx ingest.
+
+**Completion criteria:**
+- Short blocks in the Downtown grid score higher than long blocks of equivalent road type
+- Segments > 400m (likely highway ramps or arterials) receive a meaningful penalty
+- Factor is applied correctly from `distance_m` already stored in the segment
+
+**Test cases:**
+1. `score_segment` with `distance_m=45` → modifier = +8
+2. `score_segment` with `distance_m=90` → modifier = +4
+3. `score_segment` with `distance_m=180` → modifier = 0
+4. `score_segment` with `distance_m=300` → modifier = -6
+5. `score_segment` with `distance_m=500` → modifier = -12
+
+---
+
+### B2.6 — Scoring: Calibration Pass
+
+**Description:**
+After implementing B2.1–B2.5, re-run the batch scorer (B3) and validate the score distribution against known Jersey City ground truth. Tune `scoring_config.yml` weights until the distribution meets the targets below. This is a manual calibration step — no new code, just config tuning and spot-checking via DB queries and the map.
+
+Known ground truth anchors for Jersey City:
+
+| Location | Expected score range |
+|---|---|
+| Hudson River Waterfront Promenade | 80–95 |
+| Grove Street / Newark Ave commercial corridor | 70–85 |
+| Hamilton Park / Van Vorst Park perimeter | 70–80 |
+| Typical Downtown residential grid | 50–65 |
+| Jersey Ave near Turnpike ramps | 20–35 |
+| NJ Turnpike service roads | 10–25 |
+
+**Completion criteria:**
+- Score standard deviation across all segments > 15
+- All six ground truth anchors fall within their expected ranges
+- Score distribution histogram shows meaningful spread across 20–90
+- No more than 30% of segments fall within any single 10-point band
+
+**Test cases:**
+1. `SELECT STDDEV(ai_score) FROM segments` → > 15
+2. Spot-check each ground truth anchor in the DB against its expected range
+3. `SELECT WIDTH_BUCKET(ai_score, 0, 100, 10) AS bucket, COUNT(*) FROM segments GROUP BY bucket ORDER BY bucket` — no single bucket contains > 30% of all segments
+4. Visual map check: clear differentiation visible between the waterfront, commercial corridors, residential grid, and highway-adjacent streets
+
+---
+
 ### B3 — Batch Scoring Runner
 
 **Description:**
@@ -289,6 +456,30 @@ The bbox endpoint must use PostGIS `ST_Intersects` for spatial filtering. Each G
 5. `GET /segments/{nonexistent_id}` → 404
 6. Response is valid GeoJSON (validate against GeoJSON spec)
 7. Full Jersey City bbox (`EXPLAIN ANALYZE`) confirms GIST index is used, query < 500ms
+
+---
+
+### C2.1 — Segments API: Street Name in Response
+
+**Description:**
+Update `GET /segments` and `GET /segments/{id}` to include a human-readable `display_name` field in each feature's GeoJSON properties. Extract from `osm_tags` in priority order:
+
+1. `osm_tags->>'name'` (e.g. "Grove Street")
+2. If null: derive a label from `osm_tags->>'highway'` (e.g. `residential` → "Residential street", `footway` → "Footway", `path` → "Path")
+3. If both null: `"Unnamed segment"`
+
+This fallback hierarchy must be applied server-side so the frontend never has to handle it.
+
+**Completion criteria:**
+- No segment in the API response has `display_name = "Unnamed segment"` for any named street in Downtown Jersey City
+- All segments have a non-null, non-empty `display_name`
+- Fallback hierarchy is applied in the API, not the frontend
+
+**Test cases:**
+1. Fetch Grove Street segment → `display_name = "Grove Street"`
+2. Fetch an unnamed footpath → `display_name = "Footway"` (not "Unnamed segment")
+3. Zero features in the Jersey City bbox response have `display_name = "Unnamed segment"`
+4. `GET /segments/{id}` for a named segment → `display_name` present and correct
 
 ---
 
@@ -482,7 +673,7 @@ Preference for segments adjacent to already-verified high-scoring segments is im
 ### E1 — Project Setup & Base Layout
 
 **Description:**
-Initialize the React + TypeScript frontend with Vite. Set up Tailwind CSS, React Query, and React Router. Establish the base layout: a full-screen map area with a collapsible side panel.
+Initialize the React + TypeScript frontend with Vite. Configure Tailwind CSS, React Query, and React Router. Establish the base layout: a full-screen map area with a collapsible side panel.
 
 Install MapLibre GL JS (`maplibre-gl`) instead of Mapbox. No API key or account required. Configure the tile source in a single constants file so it can be swapped later without touching component code.
 
@@ -518,6 +709,7 @@ Implementation notes:
 - Initialize the map with `new maplibregl.Map({ style: TILE_URL, ... })` — no token needed
 - Fetch segments on map load and on `moveend` event (debounced 300ms)
 - Add segments as a MapLibre GeoJSON source, then a `line` layer on top
+- Base map style URL should use OpenFreeMap (e.g. `https://tiles.openfreemap.org/styles/liberty`)
 - Color expression: MapLibre `interpolate` expression (identical syntax to Mapbox) mapping score 0–100 to the gradient in spec Section 4.3
 - Unverified segments: `line-dasharray: [2, 2]`
 - Verified segments: solid line
@@ -533,7 +725,7 @@ Implementation notes:
 - Toggle buttons correctly show/hide overlay and filter to verified-only
 
 **Test cases:**
-1. Load app over Jersey City waterfront → base map tiles render, colored segment lines visible
+1. Load app over Jersey City waterfront → OpenFreeMap basemap renders and colored segment lines visible
 2. A segment with score 85 renders deep green; a segment with score 15 renders red
 3. An unverified segment renders dashed; a verified segment renders solid
 4. Click a segment → detail panel appears with score, verified badge, and vibe tags
@@ -541,6 +733,21 @@ Implementation notes:
 6. Pan map 500m → new segments load in the new viewport (confirmed via Network tab)
 7. No requests to any Mapbox domain appear in the Network tab
 ---
+
+### E2.1 — Map: Display Segment Name in Detail Panel
+
+**Description:**
+Update the segment detail panel to display `display_name` from the API response (requires C2.1) instead of the hardcoded "Unnamed segment" fallback. Surface the `highway` type as a secondary label beneath the name for additional context (e.g. "Residential street" in smaller text under "Grove Street").
+
+**Completion criteria:**
+- Detail panel always shows a meaningful name when a segment is clicked
+- No instance of "Unnamed segment" appears in the UI for any named street
+- `highway` type shown as a subtitle beneath the street name
+
+**Test cases:**
+1. Click a named street → panel header shows street name (e.g. "Grove Street")
+2. Click an unnamed footpath → panel shows "Footway", not "Unnamed segment"
+3. Click any segment → a non-empty `display_name` is always shown
 
 ### E3 — Route Planner UI
 
