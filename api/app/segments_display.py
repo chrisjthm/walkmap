@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import json
+
 
 def _normalize_highway_value(highway: object) -> str | None:
     if highway is None:
         return None
     if isinstance(highway, str):
         value = highway.strip()
+        if value.startswith("[") and value.endswith("]"):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, (list, tuple, set)):
+                return _normalize_highway_value(parsed)
         return value or None
     if isinstance(highway, (list, tuple, set)):
         candidates = [str(item).strip() for item in highway if str(item).strip()]
