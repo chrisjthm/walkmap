@@ -22,6 +22,49 @@ def test_waterfront_footway_scores_high() -> None:
     assert result.factors.get("waterfront") == 1.0
 
 
+def test_waterfront_distance_tiers_apply_bonus() -> None:
+    weights = load_scoring_config()
+    base = score_segment({"highway": "footway"}, [], weights).score
+
+    close = score_segment(
+        {"highway": "footway"},
+        [],
+        weights,
+        water_distance_m=30,
+    )
+    assert close.factors.get("waterfront") == 1.0
+    assert close.score == base + weights["weights"]["waterfront"]
+
+    mid = score_segment(
+        {"highway": "footway"},
+        [],
+        weights,
+        water_distance_m=60,
+    )
+    expected_mid = base + weights["weights"]["waterfront"] * 0.4
+    assert abs(mid.score - expected_mid) < 0.01
+    assert mid.factors.get("waterfront") == 0.4
+
+    far = score_segment(
+        {"highway": "footway"},
+        [],
+        weights,
+        water_distance_m=120,
+    )
+    expected_far = base + weights["weights"]["waterfront"] * 0.16
+    assert abs(far.score - expected_far) < 0.01
+    assert far.factors.get("waterfront") == 0.16
+
+    none = score_segment(
+        {"highway": "footway"},
+        [],
+        weights,
+        water_distance_m=200,
+    )
+    assert none.factors.get("waterfront") is None
+    assert none.score == base
+
+
 def test_residential_sidewalk_and_business_scores_above_threshold() -> None:
     weights = load_scoring_config()
     pois = [{"amenity": "restaurant"} for _ in range(5)]

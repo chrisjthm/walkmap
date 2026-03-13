@@ -35,6 +35,7 @@ def score_segment(
     osm_tags: dict,
     nearby_pois: list[dict],
     factor_weights: dict,
+    water_distance_m: float | None = None,
 ) -> ScoringResult:
     """Score a segment based on OSM tags and nearby POIs."""
     weights = factor_weights.get("weights", factor_weights)
@@ -71,9 +72,13 @@ def score_segment(
         factors["tree_cover"] = 1.0
         score += weights.get("tree_cover", 0.0)
 
-    if _is_waterfront(osm_tags, nearby_pois):
-        factors["waterfront"] = 1.0
-        score += weights.get("waterfront", 0.0)
+    waterfront_distance = _waterfront_distance_m(osm_tags, nearby_pois, water_distance_m)
+    waterfront_bonus, waterfront_factor = _waterfront_bonus(
+        waterfront_distance, weights.get("waterfront", 0.0)
+    )
+    if waterfront_bonus:
+        factors["waterfront"] = waterfront_factor
+        score += waterfront_bonus
 
     business_count = _business_poi_count(nearby_pois)
     business_threshold = thresholds.get("business_density", 5)
@@ -177,7 +182,54 @@ def _has_tree_cover(osm_tags: dict, nearby_pois: list[dict]) -> bool:
 def _is_waterfront(osm_tags: dict, nearby_pois: list[dict]) -> bool:
     if osm_tags.get("natural") == "water" or osm_tags.get("waterway"):
         return True
-    return any(poi.get("natural") == "water" or poi.get("waterway") for poi in nearby_pois)
+    if osm_tags.get("leisure") == "marina":
+        return True
+    return any(
+        poi.get("natural") == "water" or poi.get("waterway") or poi.get("leisure") == "marina"
+        for poi in nearby_pois
+    )
+
+
+def _waterfront_distance_m(
+    osm_tags: dict, nearby_pois: list[dict], water_distance_m: float | None
+) -> float | None:
+    if _is_waterfront(osm_tags, nearby_pois):
+        return 0.0
+    if water_distance_m is not None:
+        return float(water_distance_m)
+    distances: list[float] = []
+    for poi in nearby_pois:
+        if not (
+            poi.get("natural") == "water"
+            or poi.get("waterway")
+            or poi.get("leisure") == "marina"
+        ):
+            continue
+        distance = poi.get("distance_m")
+        if distance is None:
+            distances.append(0.0)
+            continue
+        try:
+            distances.append(float(distance))
+        except (TypeError, ValueError):
+            continue
+    if not distances:
+        return None
+    return min(distances)
+
+
+def _waterfront_bonus(distance_m: float | None, weight: float) -> tuple[float, float]:
+    if distance_m is None:
+        return 0.0, 0.0
+    if distance_m <= 40:
+        factor = 1.0
+    elif distance_m <= 80:
+        factor = 0.4
+    elif distance_m <= 150:
+        factor = 0.16
+    else:
+        return 0.0, 0.0
+    return weight * factor, factor
 
 
 def _business_poi_count(nearby_pois: list[dict]) -> int:

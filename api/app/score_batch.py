@@ -9,6 +9,7 @@ from app.ingest import get_engine
 from app.scoring import load_scoring_config, score_segment
 
 DEFAULT_RADIUS_M = 50
+DEFAULT_WATER_RADIUS_M = 300
 
 
 def run_batch_scoring(
@@ -43,6 +44,7 @@ def _score_batches(
         return 0
 
     has_pois = _pois_table_exists(connection)
+    has_water = _water_table_exists(connection)
     processed = 0
 
     while True:
@@ -74,7 +76,19 @@ def _score_batches(
                 if has_pois
                 else []
             )
-            result = score_segment(row["osm_tags"], nearby_pois, weights)
+            water_distance_m = None
+            if has_water:
+                water_distance_m = _fetch_water_distance_m(
+                    connection,
+                    row["geometry"],
+                    DEFAULT_WATER_RADIUS_M,
+                )
+            result = score_segment(
+                row["osm_tags"],
+                nearby_pois,
+                weights,
+                water_distance_m=water_distance_m,
+            )
             updates.append(
                 {
                     "id": row["id"],
@@ -118,6 +132,14 @@ def _pois_table_exists(connection: Connection) -> bool:
     )
 
 
+def _water_table_exists(connection: Connection) -> bool:
+    return (
+        connection.execute(text("SELECT to_regclass('public.water_features')"))
+        .scalar_one()
+        is not None
+    )
+
+
 def _fetch_nearby_pois(connection: Connection, geometry_wkb: bytes, radius_m: int) -> list[dict]:
     rows = connection.execute(
         text(
@@ -134,6 +156,30 @@ def _fetch_nearby_pois(connection: Connection, geometry_wkb: bytes, radius_m: in
         {"geom": geometry_wkb, "radius_m": radius_m},
     ).mappings().all()
     return [row["tags"] for row in rows]
+
+
+def _fetch_water_distance_m(
+    connection: Connection, geometry_wkb: bytes, radius_m: int
+) -> float | None:
+    row = connection.execute(
+        text(
+            """
+            WITH midpoint AS (
+                SELECT ST_LineInterpolatePoint(ST_GeomFromEWKB(:geom), 0.5) AS geom
+            )
+            SELECT ST_Distance(w.geometry::geography, m.geom::geography) AS distance_m
+            FROM water_features w
+            CROSS JOIN midpoint m
+            WHERE ST_DWithin(w.geometry::geography, m.geom::geography, :radius_m)
+            ORDER BY distance_m
+            LIMIT 1
+            """
+        ),
+        {"geom": geometry_wkb, "radius_m": radius_m},
+    ).mappings().first()
+    if row is None:
+        return None
+    return float(row["distance_m"])
 
 
 def parse_args() -> argparse.Namespace:

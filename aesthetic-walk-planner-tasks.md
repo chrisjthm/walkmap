@@ -248,10 +248,10 @@ Replace the binary waterfront proximity check with a distance-band gradient. Que
 
 | Distance to water | Score bonus |
 |---|---|
-| 0–50m | +25 |
-| 51–150m | +15 |
-| 151–300m | +5 |
-| > 300m | 0 |
+| 0–40m | +25 |
+| 41–80m | +10 |
+| 81–150m | +4 |
+| > 150m | 0 |
 
 The Hudson River promenade in Jersey City should be the clearest beneficiary — segments directly on the waterfront path should score noticeably higher than inland streets.
 
@@ -262,10 +262,11 @@ The Hudson River promenade in Jersey City should be the clearest beneficiary —
 
 **Test cases:**
 1. Score a mock segment with midpoint 30m from water → bonus of +25 applied
-2. Score a mock segment 200m from water → bonus of +5 applied
-3. Score a mock segment 500m from water → no bonus
-4. After re-running B3, verify in DB: `SELECT AVG(ai_score) FROM segments WHERE ST_DWithin(geometry, <hudson_river_geom>, 50)` is > 75
-5. Visual check: waterfront promenade is clearly greener than one block inland on the map
+2. Score a mock segment 60m from water → bonus of +10 applied
+3. Score a mock segment 120m from water → bonus of +4 applied
+4. Score a mock segment 200m from water → no bonus
+5. After re-running B3, verify in DB: `SELECT AVG(ai_score) FROM segments WHERE ST_DWithin(geometry, <hudson_river_geom>, 40)` is > 75
+6. Visual check: waterfront promenade is clearly greener than one block inland on the map
 
 ---
 
