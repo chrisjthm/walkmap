@@ -81,11 +81,10 @@ def score_segment(
         score += waterfront_bonus
 
     business_count = _business_poi_count(nearby_pois)
-    business_threshold = thresholds.get("business_density", 5)
-    business_score = min(business_count / float(business_threshold), 1.0)
-    if business_score > 0:
-        factors["business_density"] = business_score
-        score += weights.get("business_density", 0.0) * business_score
+    business_bonus = _poi_density_bonus(business_count)
+    if business_bonus:
+        factors["business_density"] = business_bonus
+        score += business_bonus
 
     if _is_park_adjacent(osm_tags, nearby_pois):
         factors["park_adjacency"] = 1.0
@@ -233,20 +232,23 @@ def _waterfront_bonus(distance_m: float | None, weight: float) -> tuple[float, f
 
 
 def _business_poi_count(nearby_pois: list[dict]) -> int:
-    business_amenities = {
-        "restaurant",
-        "cafe",
-        "bar",
-        "fast_food",
-        "biergarten",
-    }
     count = 0
     for poi in nearby_pois:
         amenity = poi.get("amenity")
         shop = poi.get("shop")
-        if amenity in business_amenities or shop is not None:
+        if amenity is not None or shop is not None:
             count += 1
     return count
+
+
+def _poi_density_bonus(business_count: int) -> float:
+    if business_count <= 0:
+        return 0.0
+    if business_count <= 3:
+        return 8.0
+    if business_count <= 8:
+        return 16.0
+    return 22.0
 
 
 def _is_park_adjacent(osm_tags: dict, nearby_pois: list[dict]) -> bool:

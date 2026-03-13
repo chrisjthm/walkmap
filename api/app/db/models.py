@@ -76,6 +76,15 @@ class WaterFeature(Base):
     osm_tags: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
+class Poi(Base):
+    __tablename__ = "pois"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    geometry: Mapped[str] = mapped_column(Geometry("GEOMETRY", srid=4326), nullable=False)
+    osm_tags: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
 class Rating(Base):
     __tablename__ = "ratings"
 
