@@ -41,7 +41,7 @@ def score_segment(
     weights = factor_weights.get("weights", factor_weights)
     thresholds = factor_weights.get("thresholds", {})
 
-    score = 50.0
+    score = 40.0
     factors: dict[str, float] = {}
 
     highway = osm_tags.get("highway")
@@ -97,6 +97,11 @@ def score_segment(
     if _is_residential(osm_tags):
         factors["residential_landuse"] = 1.0
         score += weights.get("residential_landuse", 0.0)
+
+    residential_refinement = _residential_refinement_modifier(osm_tags)
+    if residential_refinement:
+        factors["residential_refinement"] = residential_refinement
+        score += residential_refinement
 
     maxspeed_limit = thresholds.get("speed_limit_mph", 45)
     if _maxspeed_over(osm_tags.get("maxspeed"), maxspeed_limit):
@@ -285,6 +290,83 @@ def _maxspeed_over(maxspeed: Any, limit: int) -> bool:
         if digits:
             try:
                 if int(digits) > limit:
+                    return True
+            except ValueError:
+                continue
+    return False
+
+
+def _residential_refinement_modifier(osm_tags: dict) -> float:
+    highway = osm_tags.get("highway")
+    penalties: list[float] = []
+    bonuses: list[float] = []
+
+    if _tag_in(highway, {"living_street"}):
+        bonuses.append(10.0)
+
+    if _tag_in(highway, {"residential", "living_street"}):
+        if _tag_in(osm_tags.get("oneway"), {"yes", "true", "1"}):
+            penalties.append(-8.0)
+        if _maxspeed_over_residential(osm_tags.get("maxspeed")):
+            penalties.append(-10.0)
+        if _lanes_at_least(osm_tags.get("lanes"), 2):
+            penalties.append(-8.0)
+
+    if _tag_in(highway, {"secondary", "tertiary"}) and "sidewalk" not in osm_tags:
+        penalties.append(-12.0)
+
+    penalty_total = max(-20.0, sum(penalties))
+    bonus_total = min(10.0, sum(bonuses))
+    return penalty_total + bonus_total
+
+
+def _maxspeed_over_residential(maxspeed: Any) -> bool:
+    if maxspeed is None:
+        return False
+    for value in _tag_values(maxspeed):
+        if isinstance(value, (int, float)):
+            if value > 25:
+                return True
+            continue
+        text = str(value).lower().strip()
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if not digits:
+            continue
+        try:
+            speed = int(digits)
+        except ValueError:
+            continue
+        if "km" in text or "kph" in text or "kmh" in text:
+            if speed > 40:
+                return True
+        else:
+            if speed > 25:
+                return True
+    return False
+
+
+def _lanes_at_least(lanes: Any, minimum: int) -> bool:
+    if lanes is None:
+        return False
+    for value in _tag_values(lanes):
+        if isinstance(value, (int, float)):
+            if value >= minimum:
+                return True
+            continue
+        digits = []
+        current = ""
+        for ch in str(value):
+            if ch.isdigit():
+                current += ch
+            else:
+                if current:
+                    digits.append(current)
+                    current = ""
+        if current:
+            digits.append(current)
+        for entry in digits:
+            try:
+                if int(entry) >= minimum:
                     return True
             except ValueError:
                 continue
