@@ -162,6 +162,43 @@ Key implementation notes:
 
 ---
 
+### B1.1 — Ingest: Pedestrian-First Segment Filtering
+
+**Description:**
+Reverts and replaces the sidewalk suppression logic from C2.2. Rather than suppressing parallel footway segments at the API layer, apply correct inclusion/exclusion rules at ingest time so the dataset only contains segments relevant to a pedestrian walk planner. Roads are largely noise on a walk map — the core dataset should be the pedestrian network, with road carriageways included only as a fallback where no better walking surface exists.
+
+Remove the C2.2 suppression logic from the segments API entirely once this task is complete.
+
+**Inclusion rules (apply during OSM ingest in B1):**
+
+| Highway type | Rule | Notes |
+|---|---|---|
+| `footway`, `path`, `pedestrian`, `steps` | Always include | Core pedestrian network |
+| `living_street` | Always include | Pedestrian-priority shared space |
+| `residential` (low speed / low traffic) | Include | Legitimate walking surface |
+| `residential` or `tertiary` with no parallel mapped sidewalk | Include, score penalty | Fallback only — apply -15 to ai_score |
+| `secondary` with `sidewalk=both/left/right` | Include | Sidewalk mapped as attribute, not separate way |
+| `secondary` or `tertiary` with no sidewalk tag | Exclude | If sidewalk exists as separate way, carriageway is redundant; if it doesn't, not a good walking surface |
+| `motorway`, `trunk`, `primary` | Always exclude | Never appropriate for pedestrians |
+| `service`, `track` | Exclude | Too ambiguous; waterfront proximity scoring will catch legitimate exceptions |
+
+**Completion criteria:**
+- Re-ingested dataset contains no `motorway`, `trunk`, or `primary` segments
+- Re-ingested dataset contains no `secondary` or `tertiary` segments without a sidewalk tag
+- Footway, path, and pedestrian segments are all retained
+- C2.2 suppression logic is removed from the segments API
+- Segment count after re-ingest is plausible (expect a reduction in total segments but an increase in the ratio of pedestrian-specific ways)
+
+**Test cases:**
+1. `SELECT COUNT(*) FROM segments WHERE osm_tags->>'highway' IN ('motorway', 'trunk', 'primary')` → 0 rows after re-ingest
+2. `SELECT COUNT(*) FROM segments WHERE osm_tags->>'highway' IN ('secondary', 'tertiary') AND osm_tags->>'sidewalk' IS NULL` → 0 rows
+3. `SELECT COUNT(*) FROM segments WHERE osm_tags->>'highway' = 'footway'` → significantly more rows than carriageway types, confirming pedestrian ways dominate the dataset
+4. Visual check: the map overlay shows footpaths, park paths, and sidewalks prominently; road carriageways are largely absent except quiet residential streets
+5. Mary Benson Park paths and Hudson River promenade paths are present and rendering correctly
+6. `GET /segments?bbox=...` response no longer applies any suppression logic — all included segments are returned as-is
+
+---
+
 ### B2 — AI Scoring Engine
 
 **Description:**
@@ -521,6 +558,41 @@ When a sidewalk segment is included in the response (i.e. not suppressed), resol
 
 ---
 
+### C2.3 — Segments API: In-Memory Segment Cache
+
+**Description:**
+Rather than querying PostGIS on every `GET /segments?bbox=...` request, preload the full segment dataset into memory at API startup and serve bbox requests from the in-memory cache. For the Jersey City MVP dataset (~3,000–5,000 segments, ~3–5MB), this eliminates per-request DB latency and removes the need for a minimum zoom threshold on the frontend.
+
+**Cache structure:**
+Load all segments from PostGIS as a GeoJSON FeatureCollection on startup and store it in a module-level cache object alongside a timestamp. The bbox endpoint filters the in-memory collection using a simple coordinate bounds check — no spatial index needed at this scale.
+
+**Cache refresh:**
+- Expose a `refresh_segment_cache()` function that reloads from PostGIS and updates the in-memory store
+- Call this automatically after the batch scorer (B3) completes a run
+- Expose `POST /admin/cache/refresh` as a manually triggered refresh endpoint (no auth required for MVP — this is a local/personal deployment)
+- Log cache load time and segment count on each refresh
+
+**Startup behavior:**
+- Cache is populated before the API begins accepting requests (block startup until load is complete)
+- If the DB is unavailable at startup, fail fast with a clear error message rather than starting with an empty cache
+
+**Completion criteria:**
+- `GET /segments?bbox=...` response time < 50ms for any Jersey City viewport
+- Full segment dataset is loaded into memory before the first request is served
+- Cache refresh correctly picks up score changes made after the initial load
+- `POST /admin/cache/refresh` triggers a reload and returns the new segment count and load time
+- API startup fails with a descriptive error if PostGIS is unreachable
+
+**Test cases:**
+1. Start the API → logs show segment count and cache load time on startup (e.g. "Loaded 4,218 segments in 1.2s")
+2. `GET /segments?bbox=...` for any Jersey City viewport → response time < 50ms (measure with `curl -w "%{time_total}"`)
+3. Update a segment's `composite_score` directly in the DB, call `POST /admin/cache/refresh` → subsequent bbox response reflects the updated score
+4. Run the batch scorer (B3) → cache refresh is triggered automatically, logged output confirms reload
+5. Start the API with PostGIS unavailable → startup fails immediately with a clear error, does not start serving requests with empty data
+6. `POST /admin/cache/refresh` → response body includes new segment count and time taken to reload
+
+---
+
 ### C3 — Ratings API
 
 **Description:**
@@ -792,11 +864,6 @@ Update the segment detail panel to display `display_name` from the API response 
 **Description:**
 Four UX issues to address: slow segment loading on initial load, 3D building extrusion making the overlay hard to read, insufficient click feedback on segment selection, and the detail panel failing to appear unless the side panel is already open.
 
-**Load time fixes:**
-- Add a minimum zoom threshold (zoom < 14 = no segment fetch). Show a small "Zoom in to see aesthetic scores" hint at low zoom levels instead.
-- Confirm React Query stale time is set to at least 5 minutes for segment data — panning back to a visited area should never re-fetch.
-- Run `EXPLAIN ANALYZE` on the bbox query and confirm the PostGIS GIST index is being used. If not, force it.
-
 **Visibility fixes:**
 - On map `load`, remove all `fill-extrusion` layers from the OpenFreeMap liberty style to disable 3D buildings.
 - Increase segment `line-width` to 3px at zoom 14, scaling to 5px at zoom 17 using a MapLibre zoom interpolation expression.
@@ -805,21 +872,14 @@ Four UX issues to address: slow segment loading on initial load, 3D building ext
 - Change the cursor to a pointer (`cursor: pointer`) when hovering over any segment, so it is clear segments are clickable before the user clicks.
 
 **Completion criteria:**
-- No segment fetch occurs below zoom 14; hint message visible at low zoom
-- Panning back to a previously visited area does not re-fetch within the stale window
 - No 3D building extrusion visible at any zoom level
 - Segment lines clearly visible over the base map at zoom 14 and above
 - Cursor changes to pointer on segment hover
 
 **Test cases:**
-1. Load app at zoom 12 → no request to `/segments`, hint message visible
-2. Zoom to 14 → segments fetch and render
-3. Pan to a new area, pan back → Network tab shows no duplicate request for the previously loaded bbox
-4. Zoom to street level → no 3D buildings extruding; segment lines clearly distinguishable
-5. Zoom interpolation: segment lines are 3px wide at zoom 14, 5px at zoom 17
-6. Hover over a segment → cursor changes to pointer; move off → cursor returns to default
-7. Click anywhere on the map outside a segment → detail panel dismisses
-
+1. Zoom to street level → no 3D buildings extruding; segment lines clearly distinguishable
+2. Zoom interpolation: segment lines are 3px wide at zoom 14, 5px at zoom 17
+3. Hover over a segment → cursor changes to pointer; move off → cursor returns to default
 ---
 
 ### E2.2a — Map: Segment Highlighting (Deferred)

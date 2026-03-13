@@ -7,6 +7,11 @@ from app.ingest import (
     BoundingBox,
     ParkRecord,
     SegmentRecord,
+    _azimuth_parallel,
+    _has_parallel_sidewalk,
+    _has_sidewalk_tag,
+    _is_sidewalk_candidate,
+    _normalize_highway_value,
     build_segment_id,
     ingest_parks,
     ingest_segments,
@@ -132,3 +137,69 @@ def test_ingest_parks_deduplicates_by_id(db_connection) -> None:
         text("SELECT name FROM parks WHERE id = 'way-100'")
     ).scalar_one()
     assert name == "Updated Park"
+
+
+def test_normalize_highway_prefers_pedestrian_values() -> None:
+    value = _normalize_highway_value(["path", "footway"])
+    assert value == "footway"
+
+
+def test_has_sidewalk_tag_accepts_yes_value() -> None:
+    assert _has_sidewalk_tag({"sidewalk": "yes"}) is True
+
+
+def test_is_sidewalk_candidate_footway_sidewalk() -> None:
+    assert _is_sidewalk_candidate({"highway": "footway", "footway": "sidewalk"}) is True
+
+
+def test_is_sidewalk_candidate_unnamed_footway() -> None:
+    assert _is_sidewalk_candidate({"highway": "footway"}) is True
+
+
+def test_is_sidewalk_candidate_named_footway_is_false() -> None:
+    assert _is_sidewalk_candidate({"highway": "footway", "name": "Named Walk"}) is False
+
+
+def test_is_sidewalk_candidate_sidewalk_of_tag() -> None:
+    assert _is_sidewalk_candidate({"sidewalk:of": "Morris Street"}) is True
+
+
+def test_parallel_sidewalk_detection() -> None:
+    main_line = LineString([(-74.0, 40.0), (-74.0, 40.001)])
+    sidewalk_line = LineString([(-74.0001, 40.0), (-74.0001, 40.001)])
+    near_deg = 0.0003
+    sidewalk = type("Sidewalk", (), {})()
+    sidewalk.geom_line = sidewalk_line
+    sidewalk.azimuth = 0.0
+    sidewalk.sidewalk_of = "Morris Street"
+
+    assert _has_parallel_sidewalk(
+        geom_line=main_line,
+        azimuth=0.0,
+        name="Morris Street",
+        sidewalks=[sidewalk],
+        near_deg=near_deg,
+    )
+
+
+def test_parallel_sidewalk_rejects_perpendicular() -> None:
+    main_line = LineString([(-74.0, 40.0), (-74.0, 40.001)])
+    perpendicular = LineString([(-74.0, 40.0), (-74.001, 40.0)])
+    near_deg = 0.0003
+    sidewalk = type("Sidewalk", (), {})()
+    sidewalk.geom_line = perpendicular
+    sidewalk.azimuth = 1.57
+    sidewalk.sidewalk_of = None
+
+    assert not _has_parallel_sidewalk(
+        geom_line=main_line,
+        azimuth=0.0,
+        name="Morris Street",
+        sidewalks=[sidewalk],
+        near_deg=near_deg,
+    )
+
+
+def test_azimuth_parallel_bounds() -> None:
+    assert _azimuth_parallel(0.0, 0.1) is True
+    assert _azimuth_parallel(0.0, 1.57) is False

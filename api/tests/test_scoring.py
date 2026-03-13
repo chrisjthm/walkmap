@@ -115,3 +115,15 @@ def test_weight_change_affects_score() -> None:
     weights["weights"]["road_type_positive"] = 5.0
     modified = score_segment({"highway": "footway"}, [], weights).score
     assert baseline != modified
+
+
+def test_walkmap_score_adjustment_penalty_applies() -> None:
+    weights = load_scoring_config()
+    baseline = score_segment({"highway": "residential"}, [], weights).score
+    penalized = score_segment(
+        {"highway": "residential", "walkmap_score_adjustment": -15.0},
+        [],
+        weights,
+    )
+    assert penalized.score < baseline
+    assert penalized.factors.get("walkmap_score_adjustment") == -15.0
