@@ -1,6 +1,11 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  buildScoreExpression,
+  computeScoreAnchors,
+  ScoreLegend,
+} from "./mapScoreUtils";
 
 type SegmentProperties = {
   segment_id?: string;
@@ -42,23 +47,10 @@ const EMPTY_SEGMENTS: SegmentCollection = {
   features: [],
 };
 
-const SCORE_COLOR_EXPRESSION = [
-  "interpolate",
-  ["linear"],
-  ["coalesce", ["get", "composite_score"], ["get", "score"], 0],
+const BASE_SCORE_COLOR_EXPRESSION = buildScoreExpression(
   0,
-  "#d64545",
-  20,
-  "#e78b3c",
-  40,
-  "#f2d15c",
-  60,
-  "#8ccf7a",
-  80,
-  "#2f7f4f",
   100,
-  "#1f6a3f",
-] as maplibregl.ExpressionSpecification;
+) as maplibregl.ExpressionSpecification;
 
 const JERSEY_CITY_CENTER: [number, number] = [-74.036, 40.7178];
 
@@ -89,7 +81,10 @@ class MockMap {
   private container: HTMLDivElement;
   private handlers: Record<string, MapHandlerEntry[]> = {};
   private sources = new Map<string, MockSource>();
-  private layers = new Map<string, { layout: Record<string, unknown> }>();
+  private layers = new Map<
+    string,
+    { layout: Record<string, unknown>; paint: Record<string, unknown> }
+  >();
   private bounds = {
     getWest: () => -74.06,
     getSouth: () => 40.708,
@@ -149,8 +144,8 @@ class MockMap {
     return this.sources.get(id);
   }
 
-  addLayer(layer: { id: string; layout?: Record<string, unknown> }) {
-    this.layers.set(layer.id, { layout: layer.layout ?? {} });
+  addLayer(layer: { id: string; layout?: Record<string, unknown>; paint?: Record<string, unknown> }) {
+    this.layers.set(layer.id, { layout: layer.layout ?? {}, paint: layer.paint ?? {} });
   }
 
   getLayer(id: string) {
@@ -161,6 +156,13 @@ class MockMap {
     const layer = this.layers.get(id);
     if (layer) {
       layer.layout[property] = value;
+    }
+  }
+
+  setPaintProperty(id: string, property: string, value: unknown) {
+    const layer = this.layers.get(id);
+    if (layer) {
+      layer.paint[property] = value;
     }
   }
 
@@ -231,6 +233,7 @@ const buildDetail = (props: SegmentProperties): SegmentDetail => {
   };
 };
 
+
 export default function MapView() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -239,6 +242,11 @@ export default function MapView() {
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<SegmentDetail | null>(null);
   const [segmentsError, setSegmentsError] = useState(false);
+  const [scoreLegend, setScoreLegend] = useState<ScoreLegend>({
+    min: 0,
+    max: 100,
+    mode: "global",
+  });
 
   const apiBase = useMemo(() => getApiBase(), []);
   const styleUrl = useMemo(
@@ -272,6 +280,20 @@ export default function MapView() {
     }
   }, []);
 
+  const updateScoreGradient = useCallback((map: maplibregl.Map, data: SegmentCollection) => {
+    const { anchorLow, anchorHigh, legend } = computeScoreAnchors(data.features);
+    const expression = buildScoreExpression(anchorLow, anchorHigh);
+
+    if (map.getLayer("segments-verified")) {
+      map.setPaintProperty("segments-verified", "line-color", expression);
+    }
+    if (map.getLayer("segments-unverified")) {
+      map.setPaintProperty("segments-unverified", "line-color", expression);
+    }
+
+    setScoreLegend(legend);
+  }, []);
+
   const fetchSegments = useCallback(async (map: maplibregl.Map) => {
     const bounds = map.getBounds();
     const bbox = [
@@ -295,10 +317,11 @@ export default function MapView() {
       const data = (await response.json()) as SegmentCollection;
       setSegmentsError(false);
       updateSource(map, data);
+      updateScoreGradient(map, data);
     } catch (error) {
       setSegmentsError(true);
     }
-  }, [apiBase, updateSource]);
+  }, [apiBase, updateScoreGradient, updateSource]);
 
   const fetchSegmentDetail = useCallback(async (feature: SegmentFeature) => {
     const fallbackDetail = buildDetail(feature.properties);
@@ -403,7 +426,7 @@ export default function MapView() {
             "line-cap": "round",
           },
           paint: {
-            "line-color": SCORE_COLOR_EXPRESSION,
+            "line-color": BASE_SCORE_COLOR_EXPRESSION,
             "line-width": ["interpolate", ["linear"], ["zoom"], 14, 3, 17, 5],
             "line-opacity": 0.45,
             "line-dasharray": [2, 2],
@@ -422,7 +445,7 @@ export default function MapView() {
             "line-cap": "round",
           },
           paint: {
-            "line-color": SCORE_COLOR_EXPRESSION,
+            "line-color": BASE_SCORE_COLOR_EXPRESSION,
             "line-width": ["interpolate", ["linear"], ["zoom"], 14, 3, 17, 5],
             "line-opacity": 0.9,
           },
@@ -545,6 +568,18 @@ export default function MapView() {
         >
           Verified Only
         </button>
+        <div className="map-legend" aria-live="polite">
+          <div className="map-legend-bar" aria-hidden="true" />
+          <div className="map-legend-text">
+            Scores in view:{" "}
+            <span className="map-legend-range">
+              {scoreLegend.min}-{scoreLegend.max}
+            </span>
+            {scoreLegend.mode === "global" && (
+              <span className="map-legend-note">Global scale</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {selectedDetail && (
