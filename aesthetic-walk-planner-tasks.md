@@ -787,6 +787,78 @@ Update the segment detail panel to display `display_name` from the API response 
 2. Click an unnamed footpath → panel shows "Footway", not "Unnamed segment"
 3. Click any segment → a non-empty `display_name` is always shown
 
+### E2.2 — Map: Performance & Visibility Polish
+
+**Description:**
+Four UX issues to address: slow segment loading on initial load, 3D building extrusion making the overlay hard to read, insufficient click feedback on segment selection, and the detail panel failing to appear unless the side panel is already open.
+
+**Load time fixes:**
+- Add a minimum zoom threshold (zoom < 14 = no segment fetch). Show a small "Zoom in to see aesthetic scores" hint at low zoom levels instead.
+- Confirm React Query stale time is set to at least 5 minutes for segment data — panning back to a visited area should never re-fetch.
+- Run `EXPLAIN ANALYZE` on the bbox query and confirm the PostGIS GIST index is being used. If not, force it.
+
+**Visibility fixes:**
+- On map `load`, remove all `fill-extrusion` layers from the OpenFreeMap liberty style to disable 3D buildings.
+- Increase segment `line-width` to 3px at zoom 14, scaling to 5px at zoom 17 using a MapLibre zoom interpolation expression.
+
+**Selection feedback fixes:**
+- Change the cursor to a pointer (`cursor: pointer`) when hovering over any segment, so it is clear segments are clickable before the user clicks.
+
+**Completion criteria:**
+- No segment fetch occurs below zoom 14; hint message visible at low zoom
+- Panning back to a previously visited area does not re-fetch within the stale window
+- No 3D building extrusion visible at any zoom level
+- Segment lines clearly visible over the base map at zoom 14 and above
+- Cursor changes to pointer on segment hover
+
+**Test cases:**
+1. Load app at zoom 12 → no request to `/segments`, hint message visible
+2. Zoom to 14 → segments fetch and render
+3. Pan to a new area, pan back → Network tab shows no duplicate request for the previously loaded bbox
+4. Zoom to street level → no 3D buildings extruding; segment lines clearly distinguishable
+5. Zoom interpolation: segment lines are 3px wide at zoom 14, 5px at zoom 17
+6. Hover over a segment → cursor changes to pointer; move off → cursor returns to default
+7. Click anywhere on the map outside a segment → detail panel dismisses
+
+---
+
+### E2.2a — Map: Segment Highlighting (Deferred)
+
+**Description:**
+Implement a distinct highlight style for the selected segment so users get immediate visual feedback on click.
+
+**Implementation notes:**
+- On segment click, apply a distinct highlight style to the selected segment: increase `line-width` by 2px and render in white or bright yellow, overlaid on top of the score color.
+- Implement this as a separate MapLibre layer filtered to the selected `segment_id` so it doesn't interfere with the score color layer.
+
+**Completion criteria:**
+- Clicked segment is visually distinct from all other segments immediately on click
+- Click a different segment → highlight moves to the new selection, previous segment returns to its score color
+
+**Test cases:**
+1. Click a segment → that segment immediately renders with a highlight style distinct from its neighbors
+2. Click a different segment → highlight moves to the new selection, previous segment returns to its score color
+
+---
+
+### E2.2b — Map: Detail Panel Decoupling (Deferred)
+
+**Description:**
+Ensure the segment detail panel opens on click even when the side panel is closed. The detail panel must be an independent overlay anchored to the map.
+
+**Implementation notes:**
+- Decouple the detail panel's visibility from the side panel state.
+- The detail panel should appear on click and dismiss on close or on clicking elsewhere on the map.
+
+**Completion criteria:**
+- Detail panel appears on segment click whether or not the side panel is open
+
+**Test cases:**
+1. Close the side panel entirely, click a segment → detail panel still appears
+2. Click anywhere on the map outside a segment → detail panel dismisses
+
+---
+
 ### E3 — Route Planner UI
 
 **Description:**

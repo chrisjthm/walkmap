@@ -377,6 +377,14 @@ export default function MapView() {
           testHook.ready = true;
         }
       }
+      const style = map.getStyle?.();
+      if (style?.layers) {
+        for (const layer of style.layers) {
+          if (layer.type === "fill-extrusion" && map.getLayer(layer.id)) {
+            map.removeLayer(layer.id);
+          }
+        }
+      }
       if (!map.getSource("segments")) {
         map.addSource("segments", {
           type: "geojson",
@@ -396,7 +404,7 @@ export default function MapView() {
           },
           paint: {
             "line-color": SCORE_COLOR_EXPRESSION,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 12, 2.4, 16, 4.8],
+            "line-width": ["interpolate", ["linear"], ["zoom"], 14, 3, 17, 5],
             "line-opacity": 0.45,
             "line-dasharray": [2, 2],
           },
@@ -415,7 +423,7 @@ export default function MapView() {
           },
           paint: {
             "line-color": SCORE_COLOR_EXPRESSION,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 12, 2.8, 16, 5.6],
+            "line-width": ["interpolate", ["linear"], ["zoom"], 14, 3, 17, 5],
             "line-opacity": 0.9,
           },
         });
