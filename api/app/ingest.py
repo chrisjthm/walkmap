@@ -47,6 +47,15 @@ class ParkRecord:
     osm_tags: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class SidewalkCandidate:
+    geometry: Any
+    geom_line: Any
+    azimuth: float | None
+    sidewalk_of: str | None
+    name: str | None
+
+
 class DataProvider(Protocol):
     def fetch_segments(self, bbox: BoundingBox) -> list[SegmentRecord]:
         """Return segment records for a bounding box."""
@@ -62,6 +71,7 @@ class OSMDataProvider:
         """Fetch walkable OSM segments within a bounding box."""
         import osmnx as ox
         from shapely.geometry import box
+        from shapely.ops import linemerge
 
         graph = ox.graph_from_bbox(
             bbox.north,
@@ -72,7 +82,11 @@ class OSMDataProvider:
         )
         edges = ox.graph_to_gdfs(graph, nodes=False, edges=True)
         bbox_polygon = box(bbox.west, bbox.south, bbox.east, bbox.north)
+        center_lat = (bbox.south + bbox.north) / 2.0
+        near_deg = _meters_to_degrees(20.0, center_lat)
 
+        sidewalk_candidates: list[SidewalkCandidate] = []
+        candidates: list[tuple[str, Any, dict[str, Any], Any, float | None, str | None]] = []
         segments: list[SegmentRecord] = []
         for (u, v, key), row in edges.iterrows():
             osmid = row.get("osmid")
@@ -85,13 +99,83 @@ class OSMDataProvider:
 
             osm_tags = normalize_osm_tags(row.to_dict())
             osm_tags.pop("geometry", None)
-            segments.append(
-                SegmentRecord(
-                    segment_id=segment_id,
-                    geometry=geometry,
-                    osm_tags=osm_tags,
+            geom_line = _line_for_azimuth(geometry, linemerge)
+            azimuth = _azimuth_for_line(geom_line)
+            name = osm_tags.get("name")
+            if _is_sidewalk_candidate(osm_tags):
+                sidewalk_candidates.append(
+                    SidewalkCandidate(
+                        geometry=geometry,
+                        geom_line=geom_line or geometry,
+                        azimuth=azimuth,
+                        sidewalk_of=osm_tags.get("sidewalk:of"),
+                        name=name,
+                    )
                 )
-            )
+            candidates.append((segment_id, geometry, osm_tags, geom_line, azimuth, name))
+
+        for segment_id, geometry, osm_tags, geom_line, azimuth, name in candidates:
+            highway = _normalize_highway_value(osm_tags.get("highway"))
+            if highway is None:
+                continue
+            if highway in _ALWAYS_EXCLUDE_HIGHWAYS:
+                continue
+            if highway in _PEDESTRIAN_HIGHWAYS or highway == "living_street":
+                segments.append(
+                    SegmentRecord(
+                        segment_id=segment_id,
+                        geometry=geometry,
+                        osm_tags=osm_tags,
+                    )
+                )
+                continue
+
+            if highway == "secondary":
+                if _has_sidewalk_tag(osm_tags, strict=True):
+                    segments.append(
+                        SegmentRecord(
+                            segment_id=segment_id,
+                            geometry=geometry,
+                            osm_tags=osm_tags,
+                        )
+                    )
+                continue
+
+            if highway == "tertiary":
+                if _has_sidewalk_tag(osm_tags):
+                    segments.append(
+                        SegmentRecord(
+                            segment_id=segment_id,
+                            geometry=geometry,
+                            osm_tags=osm_tags,
+                        )
+                    )
+                continue
+
+            if highway == "residential":
+                has_sidewalk_tag = _has_sidewalk_tag(osm_tags)
+                has_parallel_sidewalk = False
+                if not has_sidewalk_tag:
+                    has_parallel_sidewalk = _has_parallel_sidewalk(
+                        geom_line or geometry,
+                        azimuth,
+                        name,
+                        sidewalk_candidates,
+                        near_deg,
+                    )
+                if has_parallel_sidewalk:
+                    continue
+                if not has_sidewalk_tag:
+                    osm_tags = dict(osm_tags)
+                    osm_tags["walkmap_score_adjustment"] = -15.0
+                segments.append(
+                    SegmentRecord(
+                        segment_id=segment_id,
+                        geometry=geometry,
+                        osm_tags=osm_tags,
+                    )
+                )
+                continue
 
         return segments
 
@@ -185,6 +269,143 @@ def normalize_value(value: Any) -> Any:
         return value.item()
     except AttributeError:
         return str(value)
+
+
+_PEDESTRIAN_HIGHWAYS = {"footway", "path", "pedestrian", "steps"}
+_ALWAYS_EXCLUDE_HIGHWAYS = {"motorway", "trunk", "primary", "service", "track"}
+_SIDEWALK_TAGS = {"both", "left", "right", "yes"}
+_SIDEWALK_TAGS_STRICT = {"both", "left", "right"}
+
+
+def _tag_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item is not None]
+    return [str(value)]
+
+
+def _tag_in(value: Any, options: set[str]) -> bool:
+    return any(tag in options for tag in _tag_values(value))
+
+
+def _normalize_highway_value(highway: Any) -> str | None:
+    if highway is None:
+        return None
+    if isinstance(highway, (list, tuple, set)):
+        candidates = [str(item).strip() for item in highway if str(item).strip()]
+        if not candidates:
+            return None
+        priority = [
+            "footway",
+            "path",
+            "pedestrian",
+            "steps",
+            "living_street",
+            "residential",
+            "tertiary",
+            "secondary",
+            "service",
+            "track",
+            "primary",
+            "trunk",
+            "motorway",
+        ]
+        for preferred in priority:
+            if preferred in candidates:
+                return preferred
+        return candidates[0]
+    value = str(highway).strip()
+    return value or None
+
+
+def _has_sidewalk_tag(osm_tags: dict[str, Any], strict: bool = False) -> bool:
+    sidewalk = osm_tags.get("sidewalk")
+    options = _SIDEWALK_TAGS_STRICT if strict else _SIDEWALK_TAGS
+    return _tag_in(sidewalk, options)
+
+
+def _is_sidewalk_candidate(osm_tags: dict[str, Any]) -> bool:
+    footway = osm_tags.get("footway")
+    highway = _normalize_highway_value(osm_tags.get("highway"))
+    name = osm_tags.get("name")
+    sidewalk_of = osm_tags.get("sidewalk:of")
+    if sidewalk_of:
+        return True
+    if _tag_in(footway, {"sidewalk"}):
+        return True
+    if highway == "footway" and not name:
+        if footway is None:
+            return True
+        return _tag_in(footway, {"sidewalk", "both", "left", "right"})
+    return False
+
+
+def _line_for_azimuth(geometry: Any, linemerge) -> Any:
+    if geometry is None:
+        return None
+    if getattr(geometry, "is_empty", False):
+        return None
+    if getattr(geometry, "geom_type", "") == "LineString":
+        return geometry
+    line = linemerge(geometry)
+    if getattr(line, "geom_type", "") == "LineString":
+        return line
+    if getattr(line, "geom_type", "") == "MultiLineString":
+        try:
+            return max(line.geoms, key=lambda item: item.length)
+        except ValueError:
+            return None
+    return None
+
+
+def _azimuth_for_line(line: Any) -> float | None:
+    if line is None:
+        return None
+    coords = getattr(line, "coords", None)
+    if coords is None:
+        return None
+    coords_list = list(coords)
+    if len(coords_list) < 2:
+        return None
+    start = coords_list[0]
+    end = coords_list[-1]
+    return math.atan2(end[0] - start[0], end[1] - start[1])
+
+
+def _azimuth_parallel(a: float, b: float) -> bool:
+    diff = abs(a - b)
+    diff = min(diff, 2 * math.pi - diff)
+    diff_deg = math.degrees(diff)
+    return diff_deg <= 20 or diff_deg >= 160
+
+
+def _meters_to_degrees(meters: float, latitude: float) -> float:
+    meters_per_degree_lon = 111_320 * abs(math.cos(math.radians(latitude)))
+    meters_per_degree = min(111_320, meters_per_degree_lon or 111_320)
+    return meters / meters_per_degree
+
+
+def _has_parallel_sidewalk(
+    geom_line: Any,
+    azimuth: float | None,
+    name: str | None,
+    sidewalks: list[SidewalkCandidate],
+    near_deg: float,
+) -> bool:
+    if geom_line is None:
+        return False
+    for sidewalk in sidewalks:
+        if sidewalk.geom_line is None:
+            continue
+        if sidewalk.geom_line.distance(geom_line) > near_deg:
+            continue
+        if name and sidewalk.sidewalk_of and sidewalk.sidewalk_of == name:
+            return True
+        if azimuth is not None and sidewalk.azimuth is not None:
+            if _azimuth_parallel(azimuth, sidewalk.azimuth):
+                return True
+    return False
 
 
 def get_engine() -> Engine:

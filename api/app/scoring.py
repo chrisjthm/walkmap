@@ -99,6 +99,16 @@ def score_segment(
         factors["speed_limit"] = 1.0
         score += weights.get("speed_limit", 0.0)
 
+    adjustment_raw = osm_tags.get("walkmap_score_adjustment")
+    if adjustment_raw is not None:
+        try:
+            adjustment = float(adjustment_raw)
+        except (TypeError, ValueError):
+            adjustment = 0.0
+        if adjustment:
+            factors["walkmap_score_adjustment"] = adjustment
+            score += adjustment
+
     score = max(0.0, min(100.0, score))
     confidence = _confidence_score(osm_tags, nearby_pois)
 
