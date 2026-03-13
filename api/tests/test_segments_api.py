@@ -64,6 +64,33 @@ def _insert_segment(
     )
 
 
+def _insert_park(db_connection, park_id: str, wkt: str, name: str | None = None) -> None:
+    db_connection.execute(
+        text(
+            """
+            INSERT INTO parks (
+                id,
+                name,
+                geometry,
+                osm_tags
+            )
+            VALUES (
+                :id,
+                :name,
+                ST_GeomFromText(:wkt, 4326),
+                CAST(:osm_tags AS jsonb)
+            )
+            """
+        ),
+        {
+            "id": park_id,
+            "name": name,
+            "wkt": wkt,
+            "osm_tags": json.dumps({"leisure": "park", "name": name} if name else {"leisure": "park"}),
+        },
+    )
+
+
 def _client() -> TestClient:
     return TestClient(app)
 
@@ -245,6 +272,94 @@ def test_segments_bbox_display_name_handles_multiple_highway_tags(db_connection)
     payload = response.json()
     feature = payload["features"][0]
     assert feature["properties"]["display_name"] == "Footway"
+
+
+def test_segments_bbox_suppresses_sidewalks_when_carriageway_present(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "seg-morris",
+        "LINESTRING(-74.0400 40.7160, -74.0400 40.7170)",
+        osm_tags={"highway": "residential", "name": "Morris Street"},
+    )
+    _insert_segment(
+        db_connection,
+        "seg-morris-sidewalk-west",
+        "LINESTRING(-74.0402 40.7160, -74.0402 40.7170)",
+        osm_tags={"highway": "footway", "sidewalk:of": "Morris Street"},
+    )
+    _insert_segment(
+        db_connection,
+        "seg-morris-sidewalk-east",
+        "LINESTRING(-74.0398 40.7160, -74.0398 40.7170)",
+        osm_tags={"highway": "footway", "sidewalk:of": "Morris Street"},
+    )
+    db_connection.commit()
+
+    client = _client()
+    response = client.get("/segments?bbox=-74.0403,40.7159,-74.0397,40.7171")
+
+    assert response.status_code == 200
+    payload = response.json()
+    feature_ids = {feature["properties"]["segment_id"] for feature in payload["features"]}
+    assert "seg-morris" in feature_ids
+    assert "seg-morris-sidewalk-west" not in feature_ids
+    assert "seg-morris-sidewalk-east" not in feature_ids
+
+
+def test_segments_bbox_sidewalk_inherits_name_when_parent_outside_bbox(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "seg-morris-parent",
+        "LINESTRING(-74.0402 40.7160, -74.0402 40.7170)",
+        osm_tags={"highway": "residential", "name": "Morris Street"},
+    )
+    _insert_segment(
+        db_connection,
+        "seg-morris-sidewalk",
+        "LINESTRING(-74.0400 40.7160, -74.0400 40.7170)",
+        osm_tags={"highway": "footway", "footway": "sidewalk"},
+    )
+    db_connection.commit()
+
+    client = _client()
+    response = client.get("/segments?bbox=-74.04005,40.7159,-74.03995,40.7171")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["features"]) == 1
+    feature = payload["features"][0]
+    assert feature["properties"]["segment_id"] == "seg-morris-sidewalk"
+    assert feature["properties"]["display_name"] == "Morris Street"
+
+
+def test_segments_bbox_does_not_suppress_park_paths(db_connection) -> None:
+    _insert_park(
+        db_connection,
+        "park-mary-benson",
+        "POLYGON((-74.04005 40.7158, -74.03995 40.7158, -74.03995 40.7168, -74.04005 40.7168, -74.04005 40.7158))",
+        name="Mary Benson Park",
+    )
+    _insert_segment(
+        db_connection,
+        "seg-park-path",
+        "LINESTRING(-74.0400 40.7159, -74.0400 40.7167)",
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "seg-park-street",
+        "LINESTRING(-74.04002 40.7159, -74.04002 40.7167)",
+        osm_tags={"highway": "residential", "name": "Park Edge"},
+    )
+    db_connection.commit()
+
+    client = _client()
+    response = client.get("/segments?bbox=-74.0402,40.7157,-74.0398,40.7169")
+
+    assert response.status_code == 200
+    payload = response.json()
+    feature_ids = {feature["properties"]["segment_id"] for feature in payload["features"]}
+    assert "seg-park-path" in feature_ids
 
 
 def test_segments_bbox_query_uses_gist_index(db_connection) -> None:

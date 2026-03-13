@@ -58,6 +58,15 @@ class Segment(Base):
     last_updated: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Park(Base):
+    __tablename__ = "parks"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    geometry: Mapped[str] = mapped_column(Geometry("GEOMETRY", srid=4326), nullable=False)
+    osm_tags: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
 class Rating(Base):
     __tablename__ = "ratings"
 

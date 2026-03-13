@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Polygon
 from sqlalchemy import text
 
 from app.ingest import (
     BoundingBox,
+    ParkRecord,
     SegmentRecord,
     build_segment_id,
+    ingest_parks,
     ingest_segments,
     normalize_osm_tags,
 )
@@ -18,6 +20,18 @@ class FakeProvider:
 
     def fetch_segments(self, bbox: BoundingBox) -> list[SegmentRecord]:
         return self._records
+
+    def fetch_parks(self, bbox: BoundingBox) -> list[ParkRecord]:
+        return []
+
+
+class FakeProviderWithParks(FakeProvider):
+    def __init__(self, records: list[SegmentRecord], parks: list[ParkRecord]) -> None:
+        super().__init__(records)
+        self._parks = parks
+
+    def fetch_parks(self, bbox: BoundingBox) -> list[ParkRecord]:
+        return self._parks
 
 
 def test_build_segment_id_handles_multi_osmid() -> None:
@@ -86,3 +100,35 @@ def test_ingest_segments_geometry_and_ai_fields(db_connection) -> None:
         text("SELECT osm_tags FROM segments WHERE id = 'seg-3'")
     ).scalar_one()
     assert osm_tags.get("highway") == "residential"
+
+
+def test_ingest_parks_deduplicates_by_id(db_connection) -> None:
+    bbox = BoundingBox(north=40.0, south=39.0, east=-73.0, west=-74.0)
+    parks = [
+        ParkRecord(
+            park_id="way-100",
+            name="Original Park",
+            geometry=Polygon(
+                [(-74.0, 40.0), (-74.0, 40.001), (-74.001, 40.001), (-74.001, 40.0)]
+            ),
+            osm_tags={"leisure": "park"},
+        ),
+        ParkRecord(
+            park_id="way-100",
+            name="Updated Park",
+            geometry=Polygon(
+                [(-74.0, 40.0), (-74.0, 40.002), (-74.002, 40.002), (-74.002, 40.0)]
+            ),
+            osm_tags={"leisure": "park", "name": "Updated Park"},
+        ),
+    ]
+    provider = FakeProviderWithParks([], parks)
+
+    ingest_parks(bbox, provider, connection=db_connection)
+
+    total = db_connection.execute(text("SELECT COUNT(*) FROM parks")).scalar_one()
+    assert total == 1
+    name = db_connection.execute(
+        text("SELECT name FROM parks WHERE id = 'way-100'")
+    ).scalar_one()
+    assert name == "Updated Park"

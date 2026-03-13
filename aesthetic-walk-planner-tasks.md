@@ -483,6 +483,44 @@ This fallback hierarchy must be applied server-side so the frontend never has to
 
 ---
 
+### C2.2 — Segments API: Sidewalk Deduplication in Map Response
+
+**Description:**
+OSM models mapped sidewalks as separate `highway=footway` ways running parallel to their parent carriageway, tagged with `footway=sidewalk` and sometimes `sidewalk:of=<parent street name>`. This causes the map overlay to render three parallel lines for any street with mapped sidewalks — the carriageway plus two footways — where visually only one line is needed.
+
+Sidewalk segments must be retained in the database (they are valid pedestrian routing paths and carry useful scoring signals), but the map overlay API response should suppress them when their parent carriageway is present in the same viewport.
+
+**Suppression logic (apply in order):**
+
+1. If a segment has `osm_tags->>'footway' = 'sidewalk'`, it is a candidate for suppression
+2. Check whether a parent carriageway segment exists in the response within 20m and running parallel (bearing difference < 20°)
+3. If a parent exists: suppress the sidewalk segment from the response
+4. If no parent carriageway is present (e.g. the street itself is outside the viewport): include the sidewalk segment and apply name inheritance (see below)
+
+**Name inheritance for sidewalk segments:**
+
+When a sidewalk segment is included in the response (i.e. not suppressed), resolve `display_name` in this order:
+1. `osm_tags->>'sidewalk:of'` — direct OSM parent reference (e.g. "Morris Street")
+2. `osm_tags->>'name'` — occasionally present on sidewalk ways
+3. Name of the nearest carriageway segment within 20m (PostGIS `ST_Distance` lookup)
+4. Fallback to `"Footway"` only if none of the above resolve
+
+**Completion criteria:**
+- Streets with mapped sidewalks render as a single line on the map overlay, not three
+- Suppressed sidewalk segments remain in the `segments` table and are still used by the routing engine
+- Sidewalk segments that appear (when parent is out of viewport) display the parent street name, not "Footway"
+- Non-sidewalk footways (standalone paths, park paths, pedestrian plazas) are unaffected by this logic
+
+**Test cases:**
+1. Mock API response for a block of Morris Street with carriageway + two sidewalk segments → only one line renders on the map
+2. Query the DB directly after the API call → all three segments still present in the `segments` table
+3. Fetch a viewport where only the sidewalk segments are present (parent carriageway just outside bbox) → sidewalk segments appear with the parent street name, not "Footway"
+4. A standalone park footpath with no `footway=sidewalk` tag → unaffected, renders normally with its own label
+5. `GET /segments/{id}` for a suppressed sidewalk segment → still returns full detail (suppression is overlay-only, not a deletion)
+6. Visual check: Morris Street, Wayne Street, and Erie Street in Downtown Jersey City each render as a single line rather than three parallel lines
+
+---
+
 ### C3 — Ratings API
 
 **Description:**
