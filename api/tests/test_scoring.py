@@ -183,3 +183,34 @@ def test_walkmap_score_adjustment_penalty_applies() -> None:
     )
     assert penalized.score < baseline
     assert penalized.factors.get("walkmap_score_adjustment") == -15.0
+
+
+def test_residential_oneway_penalty() -> None:
+    weights = load_scoring_config()
+    baseline = score_segment({"highway": "residential"}, [], weights).score
+    penalized = score_segment({"highway": "residential", "oneway": "yes"}, [], weights).score
+    assert round(baseline - penalized, 1) == 8.0
+
+
+def test_living_street_bonus() -> None:
+    weights = load_scoring_config()
+    residential = score_segment({"highway": "residential"}, [], weights).score
+    living = score_segment({"highway": "living_street"}, [], weights).score
+    assert living - residential >= 10.0
+
+
+def test_secondary_no_sidewalk_penalty_keeps_score_low() -> None:
+    weights = load_scoring_config()
+    result = score_segment({"highway": "secondary", "lanes": "2"}, [], weights)
+    assert result.score < 40.0
+
+
+def test_residential_penalty_stack_capped() -> None:
+    weights = load_scoring_config()
+    baseline = score_segment({"highway": "residential"}, [], weights).score
+    penalized = score_segment(
+        {"highway": "residential", "oneway": "yes", "maxspeed": "45 mph"},
+        [],
+        weights,
+    ).score
+    assert round(baseline - penalized, 1) == 18.0

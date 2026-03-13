@@ -920,6 +920,111 @@ Ensure the segment detail panel opens on click even when the side panel is close
 
 ---
 
+### B2.3 — Scoring: Residential Street Refinement
+
+**Description:**
+Currently all `highway=residential` segments score the same. Add sub-classification logic that penalizes residential streets with high-traffic characteristics:
+
+- `oneway=yes` on a residential street → -8 (indicates higher vehicle throughput)
+- `maxspeed > 25mph` (or `> 40kph`) → -10
+- `lanes >= 2` → -8
+- `highway=secondary` or `highway=tertiary` without sidewalk tags → -12
+- `highway=living_street` (shared pedestrian/vehicle space) → +10 bonus
+
+These modifiers stack but are capped: total penalty cannot exceed -20, total bonus cannot exceed +10 for this factor.
+
+**Completion criteria:**
+- A `highway=living_street` scores at least 10 points higher than an equivalent `highway=residential`
+- A one-way residential street scores lower than an otherwise identical two-way residential street
+- Multi-lane secondary streets without sidewalks score below 40
+
+**Test cases:**
+1. `score_segment({"highway": "residential", "oneway": "yes"}, ...)` scores lower than `score_segment({"highway": "residential"}, ...)` by ~8 points
+2. `score_segment({"highway": "living_street"}, ...)` scores > 10 points higher than equivalent `highway=residential`
+3. `score_segment({"highway": "secondary", "lanes": "2"}, ...)` with no sidewalk tag → score < 40
+4. Stack two penalties: `oneway=yes` + `maxspeed=45` → total penalty = -18 (not -20, since cap applies)
+5. After re-running B3: standard deviation of `ai_score` across all segments > 15
+
+---
+
+### E2.4 — Map: Viewport-Relative Score Gradient
+
+**Description:**
+Rather than mapping the score color gradient against a fixed global scale (0–100), normalize the gradient against the distribution of scores currently visible in the viewport. A segment that scores 72 in a high-scoring area like Downtown Jersey City will render as a mid-range yellow rather than deep green, making local differentiation meaningful for routing decisions.
+
+The underlying `composite_score` values stored in the DB and used by the routing engine are unchanged — this is a display-only transform applied in the frontend.
+
+**Implementation approach:**
+
+On each segment fetch, compute the local score distribution from the returned FeatureCollection:
+- Find the 10th and 90th percentile scores across all segments in the current viewport
+- Use these as the low and high anchors of the color gradient interpolation instead of the fixed 0 and 100
+- Update the MapLibre `line-color` expression with the new anchors each time segments are fetched
+
+This means the gradient always stretches to fill the full green → red range across whatever scores are present in the viewport, making the best local streets deep green and the worst local streets red regardless of their absolute scores.
+
+**Edge cases:**
+- Viewport with very few segments (< 10): fall back to the global fixed scale to avoid a misleading gradient from too small a sample
+- Viewport where all segments have nearly identical scores (percentile range < 10 points): fall back to global scale to avoid over-dramatizing trivial differences
+- Display the current viewport's score range somewhere unobtrusive (e.g. a small legend: "Scores in view: 58–81") so the user understands the gradient is relative
+
+**Completion criteria:**
+- Color gradient anchors update on every segment fetch based on the current viewport's score distribution
+- In a uniformly high-scoring viewport (e.g. Downtown JC waterfront), clear color variation is visible across segments rather than everything appearing deep green
+- The `composite_score` values returned by the API and used by the routing engine are unaffected
+- Fallback to global scale triggers correctly when viewport has < 10 segments or score range < 10 points
+- A small legend displays the current viewport score range
+
+**Test cases:**
+1. Load viewport over Downtown JC waterfront (all high-scoring segments) → clear green/yellow/red variation visible across segments, not uniformly green
+2. Load viewport over a mixed area → gradient reflects local distribution, not global scale
+3. Fetch segments, check MapLibre `line-color` expression anchors → low anchor ≈ 10th percentile of returned scores, high anchor ≈ 90th percentile
+4. Viewport with 5 segments → falls back to global 0–100 scale, no percentile normalization applied
+5. Viewport where all scores are within a 8-point range → falls back to global scale
+6. Legend displays correct score range for the current viewport (e.g. "Scores in view: 61–84")
+7. Request a route → route scoring uses raw `composite_score` from DB, unaffected by the display transform
+
+---
+
+### E2.5 — Map: Score Transparency Indicator in Segment Detail Panel
+
+**Description:**
+Add a small info icon (ⓘ) adjacent to the score in the segment detail panel. Tapping or hovering the icon reveals a breakdown of how the composite score was calculated — both the AI scoring factors and the user rating contribution. This builds trust in the scoring system and helps users understand why a segment scored the way it did.
+
+**Score breakdown display:**
+
+Show two sections:
+
+*AI factors* — a compact list of the factors that contributed to the AI base score, sourced from the `factors` JSON already stored on the segment (output of the `score_segment` function in B2). Display each factor as a label and a signed contribution (e.g. "Waterfront proximity +25", "Residential street +8", "One-way penalty −8"). Only show factors with a non-zero contribution.
+
+*User ratings* — show the current blend state in plain language:
+- 0 ratings: "Score is AI-estimated — no user ratings yet"
+- 1–4 ratings: "Score is a blend of AI estimate and [n] user rating(s)"
+- 5+ ratings: "Score is based entirely on user ratings"
+
+**Implementation notes:**
+- The `factors` JSON is already produced by `score_segment()` in B2 but may not currently be stored on the segment or returned by C2. If not, add `factors` as a jsonb column to the `segments` table and include it in the `GET /segments/{id}` response.
+- The breakdown should appear as a small popover or expandable section within the detail panel — not a separate screen or modal
+- Keep the default panel view uncluttered: the ⓘ icon should be subtle and the breakdown hidden until tapped
+
+**Completion criteria:**
+- ⓘ icon is visible adjacent to the score in the detail panel
+- Tapping the icon reveals the score breakdown without navigating away from the panel
+- AI factor breakdown only shows non-zero contributing factors
+- User rating blend state is described accurately in plain language for all three cases (0, 1–4, 5+ ratings)
+- `factors` JSON is stored on the segment and returned by `GET /segments/{id}`
+
+**Test cases:**
+1. Click a segment → detail panel shows ⓘ icon near the score
+2. Tap ⓘ → breakdown expands showing AI factors with signed contributions
+3. A segment with waterfront proximity bonus → "Waterfront proximity +25" appears in the breakdown
+4. A segment with zero park adjacency bonus → park adjacency does not appear in the breakdown
+5. Segment with 0 ratings → blend state reads "Score is AI-estimated — no user ratings yet"
+6. Segment with 3 ratings → blend state reads "Score is a blend of AI estimate and 3 user rating(s)"
+7. Segment with 6 ratings → blend state reads "Score is based entirely on user ratings"
+8. `GET /segments/{id}` response includes a non-null `factors` field for all scored segments
+9. Tapping ⓘ a second time collapses the breakdown
+
 ### E3 — Route Planner UI
 
 **Description:**
