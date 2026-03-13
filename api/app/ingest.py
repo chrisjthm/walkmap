@@ -11,7 +11,7 @@ from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import func
 
-from app.db.models import Park, Segment
+from app.db.models import Park, Segment, WaterFeature
 
 DEFAULT_BBOX = {
     "north": 40.7282,
@@ -48,6 +48,15 @@ class ParkRecord:
 
 
 @dataclass(frozen=True)
+class WaterRecord:
+    """Water feature payload derived from OSM features."""
+    water_id: str
+    name: str | None
+    geometry: Any
+    osm_tags: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class SidewalkCandidate:
     geometry: Any
     geom_line: Any
@@ -63,6 +72,10 @@ class DataProvider(Protocol):
 
     def fetch_parks(self, bbox: BoundingBox) -> list[ParkRecord]:
         """Return park records for a bounding box."""
+        ...
+
+    def fetch_water_features(self, bbox: BoundingBox) -> list[WaterRecord]:
+        """Return water feature records for a bounding box."""
         ...
 
 
@@ -232,6 +245,62 @@ class OSMDataProvider:
                 )
             )
         return parks
+
+    def fetch_water_features(self, bbox: BoundingBox) -> list[WaterRecord]:
+        """Fetch water features within a bounding box."""
+        import osmnx as ox
+
+        tags = {
+            "natural": ["water"],
+            "waterway": True,
+            "leisure": ["marina"],
+        }
+        gdf = ox.features_from_bbox(
+            bbox.north,
+            bbox.south,
+            bbox.east,
+            bbox.west,
+            tags=tags,
+        )
+        if gdf.empty:
+            return []
+        if gdf.crs is not None and gdf.crs.to_epsg() not in (4326, None):
+            gdf = gdf.to_crs(epsg=4326)
+        features: list[WaterRecord] = []
+        for _, row in gdf.iterrows():
+            geometry = row.get("geometry")
+            if geometry is None:
+                continue
+            if geometry.is_empty:
+                continue
+            osm_tags = normalize_osm_tags(row.to_dict())
+            osm_tags.pop("geometry", None)
+            osmid = osm_tags.get("osmid", row.get("osmid"))
+            element_type = row.get("element_type")
+            if osmid is None:
+                index_value = row.name
+                if isinstance(index_value, tuple) and index_value:
+                    osmid = index_value[0]
+                    if element_type is None and len(index_value) > 1:
+                        element_type = index_value[1]
+                else:
+                    osmid = index_value
+            if element_type is None:
+                element_type = osm_tags.get("element_type")
+            if osmid is None:
+                continue
+            water_id = normalize_osmid(osmid)
+            if element_type:
+                water_id = f"{element_type}-{water_id}"
+            features.append(
+                WaterRecord(
+                    water_id=water_id,
+                    name=osm_tags.get("name"),
+                    geometry=geometry,
+                    osm_tags=osm_tags,
+                )
+            )
+        return features
 
 
 def build_segment_id(osmid: Any, u: Any, v: Any, key: Any) -> str:
@@ -503,6 +572,47 @@ def ingest_parks(
     return total_written
 
 
+def ingest_water_features(
+    bbox: BoundingBox,
+    provider: DataProvider,
+    chunk_size: int = 200,
+    engine: Engine | None = None,
+    connection: Connection | None = None,
+) -> int:
+    """Upsert water features into the database and return the written row count."""
+    features = provider.fetch_water_features(bbox)
+    if not features:
+        return 0
+
+    if connection is None:
+        engine = engine or get_engine()
+    table = WaterFeature.__table__
+
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    for feature in features:
+        rows_by_id[feature.water_id] = {
+            "id": feature.water_id,
+            "name": feature.name,
+            "geometry": from_shape(feature.geometry, srid=4326),
+            "osm_tags": feature.osm_tags,
+        }
+    rows = list(rows_by_id.values())
+
+    total_written = 0
+    update_fields = {
+        "geometry": "geometry",
+        "osm_tags": "osm_tags",
+        "name": "name",
+    }
+    if connection is None:
+        with engine.begin() as connection:
+            total_written = _write_batches(connection, table, rows, chunk_size, update_fields)
+    else:
+        total_written = _write_batches(connection, table, rows, chunk_size, update_fields)
+
+    return total_written
+
+
 def _write_batches(
     connection: Connection,
     table,
@@ -545,7 +655,10 @@ def main() -> None:
     provider = OSMDataProvider()
     segment_count = ingest_segments(bbox, provider)
     park_count = ingest_parks(bbox, provider)
-    print(f"Ingested {segment_count} segments and {park_count} parks")
+    water_count = ingest_water_features(bbox, provider)
+    print(
+        f"Ingested {segment_count} segments, {park_count} parks, and {water_count} water features"
+    )
 
 
 if __name__ == "__main__":
