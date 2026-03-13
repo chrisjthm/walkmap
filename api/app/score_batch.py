@@ -144,7 +144,7 @@ def _fetch_nearby_pois(connection: Connection, geometry_wkb: bytes, radius_m: in
     rows = connection.execute(
         text(
             """
-            SELECT tags
+            SELECT osm_tags
             FROM pois
             WHERE ST_DWithin(
                 geometry::geography,
@@ -155,7 +155,7 @@ def _fetch_nearby_pois(connection: Connection, geometry_wkb: bytes, radius_m: in
         ),
         {"geom": geometry_wkb, "radius_m": radius_m},
     ).mappings().all()
-    return [row["tags"] for row in rows]
+    return [row["osm_tags"] for row in rows]
 
 
 def _fetch_water_distance_m(

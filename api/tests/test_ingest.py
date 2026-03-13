@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from sqlalchemy import text
 
 from app.ingest import (
     BoundingBox,
     ParkRecord,
+    PoiRecord,
     SegmentRecord,
     _azimuth_parallel,
     _has_parallel_sidewalk,
@@ -14,6 +15,7 @@ from app.ingest import (
     _normalize_highway_value,
     build_segment_id,
     ingest_parks,
+    ingest_pois,
     ingest_segments,
     normalize_osm_tags,
 )
@@ -29,6 +31,12 @@ class FakeProvider:
     def fetch_parks(self, bbox: BoundingBox) -> list[ParkRecord]:
         return []
 
+    def fetch_water_features(self, bbox: BoundingBox) -> list:
+        return []
+
+    def fetch_pois(self, bbox: BoundingBox) -> list:
+        return []
+
 
 class FakeProviderWithParks(FakeProvider):
     def __init__(self, records: list[SegmentRecord], parks: list[ParkRecord]) -> None:
@@ -37,6 +45,15 @@ class FakeProviderWithParks(FakeProvider):
 
     def fetch_parks(self, bbox: BoundingBox) -> list[ParkRecord]:
         return self._parks
+
+
+class FakeProviderWithPois(FakeProvider):
+    def __init__(self, records: list[SegmentRecord], pois: list[PoiRecord]) -> None:
+        super().__init__(records)
+        self._pois = pois
+
+    def fetch_pois(self, bbox: BoundingBox) -> list[PoiRecord]:
+        return self._pois
 
 
 def test_build_segment_id_handles_multi_osmid() -> None:
@@ -137,6 +154,34 @@ def test_ingest_parks_deduplicates_by_id(db_connection) -> None:
         text("SELECT name FROM parks WHERE id = 'way-100'")
     ).scalar_one()
     assert name == "Updated Park"
+
+
+def test_ingest_pois_deduplicates_by_id(db_connection) -> None:
+    bbox = BoundingBox(north=40.0, south=39.0, east=-73.0, west=-74.0)
+    pois = [
+        PoiRecord(
+            poi_id="node-200",
+            name="Original Cafe",
+            geometry=Point(-74.0, 40.0),
+            osm_tags={"amenity": "cafe"},
+        ),
+        PoiRecord(
+            poi_id="node-200",
+            name="Updated Cafe",
+            geometry=Point(-74.0005, 40.0005),
+            osm_tags={"amenity": "cafe", "name": "Updated Cafe"},
+        ),
+    ]
+    provider = FakeProviderWithPois([], pois)
+
+    ingest_pois(bbox, provider, connection=db_connection)
+
+    total = db_connection.execute(text("SELECT COUNT(*) FROM pois")).scalar_one()
+    assert total == 1
+    name = db_connection.execute(
+        text("SELECT name FROM pois WHERE id = 'node-200'")
+    ).scalar_one()
+    assert name == "Updated Cafe"
 
 
 def test_normalize_highway_prefers_pedestrian_values() -> None:

@@ -13,7 +13,9 @@ from app.ingest import (
     OSMDataProvider,
     get_engine,
     ingest_parks,
+    ingest_pois,
     ingest_segments,
+    ingest_water_features,
 )
 from app.score_batch import run_batch_scoring
 from app.segments_display import (
@@ -70,6 +72,8 @@ def ingest_osm(background_tasks: BackgroundTasks) -> dict[str, str | dict[str, f
     provider = OSMDataProvider()
     background_tasks.add_task(ingest_segments, bbox, provider)
     background_tasks.add_task(ingest_parks, bbox, provider)
+    background_tasks.add_task(ingest_water_features, bbox, provider)
+    background_tasks.add_task(ingest_pois, bbox, provider)
     return {"status": "queued", "bbox": DEFAULT_BBOX}
 
 

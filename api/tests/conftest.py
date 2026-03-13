@@ -67,7 +67,8 @@ def db_connection(db_engine):
         connection.execute(text("SET statement_timeout = '30s'"))
         connection.execute(
             text(
-                "TRUNCATE TABLE ratings, routes, segments, parks, users RESTART IDENTITY CASCADE"
+                "TRUNCATE TABLE ratings, routes, segments, parks, pois, water_features, users "
+                "RESTART IDENTITY CASCADE"
             )
         )
         yield connection

@@ -76,6 +76,19 @@ def test_residential_sidewalk_and_business_scores_above_threshold() -> None:
     assert result.score > 55
 
 
+def test_poi_density_bonus_tiers() -> None:
+    weights = load_scoring_config()
+    base = score_segment({}, [], weights).score
+
+    low = score_segment({}, [{"amenity": "restaurant"} for _ in range(2)], weights).score
+    mid = score_segment({}, [{"amenity": "restaurant"} for _ in range(6)], weights).score
+    high = score_segment({}, [{"amenity": "restaurant"} for _ in range(15)], weights).score
+
+    assert low - base == 8.0
+    assert mid - base == 16.0
+    assert high - base == 22.0
+
+
 def test_low_tag_count_confidence_is_low() -> None:
     weights = load_scoring_config()
     result = score_segment({"highway": "residential"}, [], weights)

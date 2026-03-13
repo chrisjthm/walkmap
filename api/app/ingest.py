@@ -11,7 +11,7 @@ from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import func
 
-from app.db.models import Park, Segment, WaterFeature
+from app.db.models import Park, Poi, Segment, WaterFeature
 
 DEFAULT_BBOX = {
     "north": 40.7282,
@@ -57,6 +57,15 @@ class WaterRecord:
 
 
 @dataclass(frozen=True)
+class PoiRecord:
+    """POI payload derived from OSM features."""
+    poi_id: str
+    name: str | None
+    geometry: Any
+    osm_tags: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class SidewalkCandidate:
     geometry: Any
     geom_line: Any
@@ -76,6 +85,10 @@ class DataProvider(Protocol):
 
     def fetch_water_features(self, bbox: BoundingBox) -> list[WaterRecord]:
         """Return water feature records for a bounding box."""
+        ...
+
+    def fetch_pois(self, bbox: BoundingBox) -> list[PoiRecord]:
+        """Return POI records for a bounding box."""
         ...
 
 
@@ -301,6 +314,61 @@ class OSMDataProvider:
                 )
             )
         return features
+
+    def fetch_pois(self, bbox: BoundingBox) -> list[PoiRecord]:
+        """Fetch POIs (amenities/shops) within a bounding box."""
+        import osmnx as ox
+
+        tags = {
+            "amenity": True,
+            "shop": True,
+        }
+        gdf = ox.features_from_bbox(
+            bbox.north,
+            bbox.south,
+            bbox.east,
+            bbox.west,
+            tags=tags,
+        )
+        if gdf.empty:
+            return []
+        if gdf.crs is not None and gdf.crs.to_epsg() not in (4326, None):
+            gdf = gdf.to_crs(epsg=4326)
+        pois: list[PoiRecord] = []
+        for _, row in gdf.iterrows():
+            geometry = row.get("geometry")
+            if geometry is None:
+                continue
+            if geometry.is_empty:
+                continue
+            osm_tags = normalize_osm_tags(row.to_dict())
+            osm_tags.pop("geometry", None)
+            osmid = osm_tags.get("osmid", row.get("osmid"))
+            element_type = row.get("element_type")
+            if osmid is None:
+                index_value = row.name
+                if isinstance(index_value, tuple) and index_value:
+                    osmid = index_value[0]
+                    if element_type is None and len(index_value) > 1:
+                        element_type = index_value[1]
+                else:
+                    osmid = index_value
+            if element_type is None:
+                element_type = osm_tags.get("element_type")
+            if osmid is None:
+                continue
+            poi_id = normalize_osmid(osmid)
+            if element_type:
+                poi_id = f"{element_type}-{poi_id}"
+            pois.append(
+                PoiRecord(
+                    poi_id=poi_id,
+                    name=osm_tags.get("name"),
+                    geometry=geometry,
+                    osm_tags=osm_tags,
+                )
+            )
+        return pois
 
 
 def build_segment_id(osmid: Any, u: Any, v: Any, key: Any) -> str:
@@ -613,6 +681,47 @@ def ingest_water_features(
     return total_written
 
 
+def ingest_pois(
+    bbox: BoundingBox,
+    provider: DataProvider,
+    chunk_size: int = 300,
+    engine: Engine | None = None,
+    connection: Connection | None = None,
+) -> int:
+    """Upsert POIs into the database and return the written row count."""
+    pois = provider.fetch_pois(bbox)
+    if not pois:
+        return 0
+
+    if connection is None:
+        engine = engine or get_engine()
+    table = Poi.__table__
+
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    for poi in pois:
+        rows_by_id[poi.poi_id] = {
+            "id": poi.poi_id,
+            "name": poi.name,
+            "geometry": from_shape(poi.geometry, srid=4326),
+            "osm_tags": poi.osm_tags,
+        }
+    rows = list(rows_by_id.values())
+
+    total_written = 0
+    update_fields = {
+        "geometry": "geometry",
+        "osm_tags": "osm_tags",
+        "name": "name",
+    }
+    if connection is None:
+        with engine.begin() as connection:
+            total_written = _write_batches(connection, table, rows, chunk_size, update_fields)
+    else:
+        total_written = _write_batches(connection, table, rows, chunk_size, update_fields)
+
+    return total_written
+
+
 def _write_batches(
     connection: Connection,
     table,
@@ -656,8 +765,13 @@ def main() -> None:
     segment_count = ingest_segments(bbox, provider)
     park_count = ingest_parks(bbox, provider)
     water_count = ingest_water_features(bbox, provider)
+    poi_count = ingest_pois(bbox, provider)
     print(
-        f"Ingested {segment_count} segments, {park_count} parks, and {water_count} water features"
+        "Ingested "
+        f"{segment_count} segments, "
+        f"{park_count} parks, "
+        f"{water_count} water features, "
+        f"and {poi_count} POIs"
     )
 
 
