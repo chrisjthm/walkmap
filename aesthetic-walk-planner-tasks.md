@@ -409,6 +409,26 @@ Known ground truth anchors for Jersey City:
 
 ---
 
+That’s a solid cleanup idea — here’s a concise markdown subtask you can drop into the task list.
+
+### B2.7 — Scoring: Externalize All Numeric Factors
+
+**Description:**  
+Move all numeric scoring values (base score, additions/subtractions, multipliers, caps, thresholds) out of code and into `scoring_config.yml`. The scoring logic should reference configuration exclusively for numeric values.
+
+**Acceptance criteria:**
+- `score_segment` has no hardcoded numeric constants affecting score outcomes.
+- Base score, per-factor bonuses/penalties, caps, and thresholds are defined in YAML.
+- Tests pass with updated config.
+
+**Notes / hints:**
+- Consider grouping config values under `weights`, `thresholds`, and `caps`.
+- Add new keys for residential refinement (penalty cap, bonus cap, per-flag values).
+
+**Test cases:**
+1. Changing a value in YAML (e.g., `base_score`) changes output without code changes.
+2. Removing a numeric constant in code doesn’t alter test outputs unless YAML changes.
+
 ### B3 — Batch Scoring Runner
 
 **Description:**
@@ -917,33 +937,6 @@ Ensure the segment detail panel opens on click even when the side panel is close
 **Test cases:**
 1. Close the side panel entirely, click a segment → detail panel still appears
 2. Click anywhere on the map outside a segment → detail panel dismisses
-
----
-
-### B2.3 — Scoring: Residential Street Refinement
-
-**Description:**
-Currently all `highway=residential` segments score the same. Add sub-classification logic that penalizes residential streets with high-traffic characteristics:
-
-- `oneway=yes` on a residential street → -8 (indicates higher vehicle throughput)
-- `maxspeed > 25mph` (or `> 40kph`) → -10
-- `lanes >= 2` → -8
-- `highway=secondary` or `highway=tertiary` without sidewalk tags → -12
-- `highway=living_street` (shared pedestrian/vehicle space) → +10 bonus
-
-These modifiers stack but are capped: total penalty cannot exceed -20, total bonus cannot exceed +10 for this factor.
-
-**Completion criteria:**
-- A `highway=living_street` scores at least 10 points higher than an equivalent `highway=residential`
-- A one-way residential street scores lower than an otherwise identical two-way residential street
-- Multi-lane secondary streets without sidewalks score below 40
-
-**Test cases:**
-1. `score_segment({"highway": "residential", "oneway": "yes"}, ...)` scores lower than `score_segment({"highway": "residential"}, ...)` by ~8 points
-2. `score_segment({"highway": "living_street"}, ...)` scores > 10 points higher than equivalent `highway=residential`
-3. `score_segment({"highway": "secondary", "lanes": "2"}, ...)` with no sidewalk tag → score < 40
-4. Stack two penalties: `oneway=yes` + `maxspeed=45` → total penalty = -18 (not -20, since cap applies)
-5. After re-running B3: standard deviation of `ai_score` across all segments > 15
 
 ---
 
