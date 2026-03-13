@@ -98,7 +98,7 @@ def _get_segments_impl(
     meters_per_degree = min(111_320, meters_per_degree_lon or 111_320)
     near_deg = 20.0 / meters_per_degree
     near_deg_small = 10.0 / meters_per_degree
-    near_deg_heuristic = 3.0 / meters_per_degree
+    near_deg_heuristic = 10.0 / meters_per_degree
     engine = get_engine()
     query = text(
         """
@@ -180,6 +180,14 @@ def _get_segments_impl(
                         CASE
                             WHEN b.footway = 'sidewalk' OR b.sidewalk_of IS NOT NULL
                             THEN :near_deg
+                            WHEN (
+                                EXISTS(
+                                    SELECT 1
+                                    FROM parks_in_bbox p
+                                    WHERE ST_Intersects(b.geom_line, p.geometry)
+                                )
+                            )
+                            THEN :near_deg_small
                             ELSE :near_deg_heuristic
                         END
                     )
