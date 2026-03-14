@@ -330,6 +330,39 @@
     letter-spacing: 0.2em;
   }
 
+  .map-legend-refresh {
+    align-self: flex-start;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid rgba(247, 241, 230, 0.4);
+    background: rgba(247, 241, 230, 0.1);
+    color: #f7f1e6;
+    font-size: 0.55rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    transition: all 0.2s ease;
+  }
+
+  .map-legend-refresh:hover {
+    background: rgba(247, 241, 230, 0.25);
+  }
+
+  .map-legend-refresh:disabled {
+    opacity: 0.65;
+    cursor: wait;
+  }
+
+  .map-legend-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 0.4rem;
+    border-radius: 999px;
+    border: 2px solid rgba(247, 241, 230, 0.35);
+    border-top-color: #f7f1e6;
+    animation: spin 0.9s linear infinite;
+  }
+
   .map-toggle {
     padding: 0.5rem 0.9rem;
     border-radius: 999px;
@@ -435,5 +468,11 @@
 
   .app-shell[data-panel="closed"] .panel-shell {
     transform: translateX(calc(-1 * var(--panel-width)));
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }

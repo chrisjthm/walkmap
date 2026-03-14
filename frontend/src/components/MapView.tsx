@@ -238,6 +238,8 @@ export default function MapView() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const debounceRef = useRef<number | undefined>(undefined);
+  const lastSegmentsRef = useRef<SegmentCollection>(EMPTY_SEGMENTS);
+  const gradientInitializedRef = useRef(false);
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<SegmentDetail | null>(null);
@@ -247,6 +249,7 @@ export default function MapView() {
     max: 100,
     mode: "global",
   });
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const apiBase = useMemo(() => getApiBase(), []);
   const styleUrl = useMemo(
@@ -294,13 +297,23 @@ export default function MapView() {
     setScoreLegend(legend);
   }, []);
 
-  const fetchSegments = useCallback(async (map: maplibregl.Map) => {
+  const fetchSegments = useCallback(async (
+    map: maplibregl.Map,
+    options?: { refreshGradient?: boolean },
+  ) => {
     const bounds = map.getBounds();
+    const west = bounds.getWest();
+    const south = bounds.getSouth();
+    const east = bounds.getEast();
+    const north = bounds.getNorth();
+    const lngSpan = east - west;
+    const latSpan = north - south;
+    const padding = 0.15;
     const bbox = [
-      bounds.getWest(),
-      bounds.getSouth(),
-      bounds.getEast(),
-      bounds.getNorth(),
+      west - lngSpan * padding,
+      south - latSpan * padding,
+      east + lngSpan * padding,
+      north + latSpan * padding,
     ]
       .map((value) => value.toFixed(6))
       .join(",");
@@ -317,9 +330,15 @@ export default function MapView() {
       const data = (await response.json()) as SegmentCollection;
       setSegmentsError(false);
       updateSource(map, data);
-      updateScoreGradient(map, data);
+      lastSegmentsRef.current = data;
+      if (options?.refreshGradient || !gradientInitializedRef.current) {
+        updateScoreGradient(map, data);
+        gradientInitializedRef.current = true;
+      }
+      return true;
     } catch (error) {
       setSegmentsError(true);
+      return false;
     }
   }, [apiBase, updateScoreGradient, updateSource]);
 
@@ -453,7 +472,7 @@ export default function MapView() {
       }
 
       updateLayerVisibility(map);
-      fetchSegments(map);
+      fetchSegments(map, { refreshGradient: true });
     });
 
     map.on("moveend", () => {
@@ -579,6 +598,28 @@ export default function MapView() {
               <span className="map-legend-note">Global scale</span>
             )}
           </div>
+          <button
+            className="map-legend-refresh"
+            type="button"
+            disabled={isRefreshing}
+            onClick={async () => {
+              if (!mapRef.current) {
+                return;
+              }
+              setIsRefreshing(true);
+              await fetchSegments(mapRef.current, { refreshGradient: true });
+              setIsRefreshing(false);
+            }}
+          >
+            {isRefreshing ? (
+              <>
+                <span className="map-legend-spinner" aria-hidden="true" />
+                Refreshing
+              </>
+            ) : (
+              "Refresh gradient"
+            )}
+          </button>
         </div>
       </div>
 
