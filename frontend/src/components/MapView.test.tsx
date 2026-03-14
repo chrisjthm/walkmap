@@ -39,7 +39,7 @@ describe("MapView gradient refresh", () => {
       ok: true,
       json: async () => data,
     });
-    global.fetch = fetchMock as typeof fetch;
+    globalThis.fetch = fetchMock as typeof fetch;
 
     const { default: MapView } = await import("./MapView");
     render(<MapView />);
@@ -54,8 +54,8 @@ describe("MapView gradient refresh", () => {
 
   it("shows a loading state while refreshing the gradient", async () => {
     const initial = buildFeatureCollection([12, 22, 32, 42, 52, 62, 72, 82, 92, 100]);
-    let resolveRefresh: ((value: unknown) => void) | null = null;
-    const refreshPromise = new Promise((resolve) => {
+    let resolveRefresh: ((value: Response) => void) | undefined;
+    const refreshPromise = new Promise<Response>((resolve) => {
       resolveRefresh = resolve;
     });
 
@@ -66,7 +66,7 @@ describe("MapView gradient refresh", () => {
       })
       .mockReturnValueOnce(refreshPromise as Promise<Response>);
 
-    global.fetch = fetchMock as typeof fetch;
+    globalThis.fetch = fetchMock as typeof fetch;
 
     const { default: MapView } = await import("./MapView");
     render(<MapView />);
@@ -85,7 +85,7 @@ describe("MapView gradient refresh", () => {
     resolveRefresh?.({
       ok: true,
       json: async () => initial,
-    });
+    } as Response);
 
     await waitFor(() => {
       expect(button.hasAttribute("disabled")).toBe(false);
