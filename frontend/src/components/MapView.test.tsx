@@ -138,7 +138,8 @@ describe("MapView score breakdown", () => {
       expect(fetchMock).toHaveBeenCalled();
     });
 
-    const map = (window as any).__walkmap__?.map;
+    const map = (window as { __walkmap__?: { map?: { __triggerClick?: (point: { x: number; y: number }) => void } } })
+      .__walkmap__?.map;
     map?.__triggerClick({ x: 0, y: 0 });
 
     await screen.findByText("Segment Detail");
@@ -187,7 +188,8 @@ describe("MapView score breakdown", () => {
       expect(fetchMock).toHaveBeenCalled();
     });
 
-    const map = (window as any).__walkmap__?.map;
+    const map = (window as { __walkmap__?: { map?: { __triggerClick?: (point: { x: number; y: number }) => void } } })
+      .__walkmap__?.map;
     map?.__triggerClick({ x: 0, y: 0 });
 
     await screen.findByText("Segment Detail");
@@ -229,7 +231,8 @@ describe("MapView score breakdown", () => {
       expect(fetchMock).toHaveBeenCalled();
     });
 
-    const map = (window as any).__walkmap__?.map;
+    const map = (window as { __walkmap__?: { map?: { __triggerClick?: (point: { x: number; y: number }) => void } } })
+      .__walkmap__?.map;
     map?.__triggerClick({ x: 0, y: 0 });
 
     await screen.findByText("Segment Detail");
