@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from typing import Any
 
 from sqlalchemy import Connection, Engine, text
@@ -95,6 +96,7 @@ def _score_batches(
                     "ai_score": result.score,
                     "ai_confidence": result.confidence,
                     "composite_score": result.score,
+                    "factors": json.dumps(result.factors),
                 }
             )
 
@@ -105,6 +107,7 @@ def _score_batches(
                 SET ai_score = :ai_score,
                     ai_confidence = :ai_confidence,
                     composite_score = :composite_score,
+                    factors = CAST(:factors AS jsonb),
                     last_updated = now()
                 WHERE id = :id
                 """

@@ -171,6 +171,13 @@ test("clicking a segment opens the detail panel", async ({ page }) => {
   await expect(page.getByText("Score:")).toBeVisible();
   await expect(page.getByText("Status: Verified")).toBeVisible();
   await expect(page.getByText("Ratings: 12")).toBeVisible();
+
+  const breakdownButton = page.getByRole("button", { name: "Score breakdown" });
+  await expect(breakdownButton).toBeVisible();
+  await breakdownButton.click();
+  await expect(page.getByText("AI factors")).toBeVisible();
+  await breakdownButton.click();
+  await expect(page.getByText("AI factors")).not.toBeVisible();
 });
 
 test("debounces fetch on map moveend", async ({ page }) => {

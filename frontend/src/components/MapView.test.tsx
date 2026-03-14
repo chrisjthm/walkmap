@@ -93,3 +93,150 @@ describe("MapView gradient refresh", () => {
     expect(button.textContent?.toLowerCase()).toContain("refresh gradient");
   });
 });
+
+describe("MapView score breakdown", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv("VITE_E2E_MOCK_MAP", "true");
+    vi.stubEnv("VITE_E2E", "true");
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows AI factors and rating blend copy for zero ratings", async () => {
+    const segments = buildFeatureCollection([88]);
+    const detail = {
+      segment_id: "seg-0",
+      composite_score: 88,
+      verified: true,
+      rating_count: 0,
+      vibe_tag_counts: {},
+      factors: {
+        waterfront: 25,
+        park_adjacency: 0,
+        walkmap_sidewalk_penalty: -15,
+      },
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => segments,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => detail,
+      });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const { default: MapView } = await import("./MapView");
+    render(<MapView />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+
+    const map = (window as any).__walkmap__?.map;
+    map?.__triggerClick({ x: 0, y: 0 });
+
+    await screen.findByText("Segment Detail");
+    const breakdownButton = screen.getByRole("button", { name: /score breakdown/i });
+    fireEvent.click(breakdownButton);
+
+    expect(await screen.findByText("AI factors")).toBeTruthy();
+    expect(screen.getByText("Waterfront proximity")).toBeTruthy();
+    expect(screen.getByText("+25")).toBeTruthy();
+    expect(screen.getByText("Residential street without sidewalks")).toBeTruthy();
+    expect(screen.getByText("-15")).toBeTruthy();
+    expect(screen.queryByText("Park adjacency")).toBeNull();
+    expect(
+      screen.getByText("Score is AI-estimated - no user ratings yet"),
+    ).toBeTruthy();
+  });
+
+  it("describes blend state for 1-4 ratings", async () => {
+    const segments = buildFeatureCollection([62]);
+    const detail = {
+      segment_id: "seg-0",
+      composite_score: 62,
+      verified: false,
+      rating_count: 3,
+      vibe_tag_counts: {},
+      factors: {
+        residential_landuse: 6,
+      },
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => segments,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => detail,
+      });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const { default: MapView } = await import("./MapView");
+    render(<MapView />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+
+    const map = (window as any).__walkmap__?.map;
+    map?.__triggerClick({ x: 0, y: 0 });
+
+    await screen.findByText("Segment Detail");
+    fireEvent.click(screen.getByRole("button", { name: /score breakdown/i }));
+
+    expect(
+      screen.getByText("Score is a blend of AI estimate and 3 user rating(s)"),
+    ).toBeTruthy();
+  });
+
+  it("describes blend state for 5+ ratings", async () => {
+    const segments = buildFeatureCollection([90]);
+    const detail = {
+      segment_id: "seg-0",
+      composite_score: 90,
+      verified: true,
+      rating_count: 6,
+      vibe_tag_counts: {},
+      factors: {
+        tree_cover: 6,
+      },
+    };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => segments,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => detail,
+      });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const { default: MapView } = await import("./MapView");
+    render(<MapView />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+
+    const map = (window as any).__walkmap__?.map;
+    map?.__triggerClick({ x: 0, y: 0 });
+
+    await screen.findByText("Segment Detail");
+    fireEvent.click(screen.getByRole("button", { name: /score breakdown/i }));
+
+    expect(
+      screen.getByText("Score is based entirely on user ratings"),
+    ).toBeTruthy();
+  });
+});

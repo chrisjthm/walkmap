@@ -395,6 +395,80 @@
     box-shadow: 0 20px 40px -22px rgba(0, 0, 0, 0.7);
   }
 
+  .score-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+  }
+
+  .score-info-button {
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 999px;
+    border: 1px solid rgba(247, 241, 230, 0.35);
+    background: rgba(247, 241, 230, 0.08);
+    color: #f7f1e6;
+    font-size: 0.8rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .score-info-button:hover {
+    border-color: rgba(247, 241, 230, 0.7);
+    background: rgba(247, 241, 230, 0.18);
+  }
+
+  .score-breakdown {
+    margin-top: 0.7rem;
+    padding: 0.75rem;
+    border-radius: 14px;
+    border: 1px solid rgba(247, 241, 230, 0.2);
+    background: rgba(8, 18, 16, 0.6);
+  }
+
+  .score-section + .score-section {
+    margin-top: 0.6rem;
+  }
+
+  .score-section-title {
+    font-size: 0.55rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(247, 241, 230, 0.7);
+  }
+
+  .score-factor-list {
+    margin-top: 0.5rem;
+    display: grid;
+    gap: 0.35rem;
+    list-style: none;
+    padding: 0;
+  }
+
+  .score-factor-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.6rem;
+    font-size: 0.75rem;
+    color: rgba(247, 241, 230, 0.9);
+  }
+
+  .score-factor-value {
+    color: #f7c77e;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .score-empty,
+  .score-user-text {
+    margin-top: 0.45rem;
+    font-size: 0.75rem;
+    color: rgba(247, 241, 230, 0.8);
+  }
+
   .segment-tags {
     display: flex;
     flex-wrap: wrap;

@@ -178,6 +178,7 @@ def get_segment_detail(segment_id: str) -> dict[str, Any]:
             verified,
             rating_count,
             vibe_tag_counts,
+            factors,
             osm_tags,
             ST_AsGeoJSON(geometry) AS geometry
         FROM segments
@@ -201,6 +202,7 @@ def get_segment_detail(segment_id: str) -> dict[str, Any]:
         "verified": row["verified"],
         "rating_count": row["rating_count"],
         "vibe_tag_counts": row["vibe_tag_counts"],
+        "factors": row["factors"],
         "osm_tags": row["osm_tags"],
         "display_name": display_name_from_osm_tags(row["osm_tags"]),
     }

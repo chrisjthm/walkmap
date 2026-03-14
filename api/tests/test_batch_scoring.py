@@ -31,7 +31,7 @@ def test_batch_scoring_updates_segments(db_connection) -> None:
     rows = db_connection.execute(
         text(
             """
-            SELECT ai_score, ai_confidence, composite_score
+            SELECT ai_score, ai_confidence, composite_score, factors
             FROM segments
             WHERE id IN ('seg-b3-1', 'seg-b3-2')
             """
@@ -43,6 +43,7 @@ def test_batch_scoring_updates_segments(db_connection) -> None:
         assert row["ai_score"] is not None
         assert 0.0 <= row["ai_confidence"] <= 1.0
         assert row["composite_score"] == row["ai_score"]
+        assert isinstance(row["factors"], dict)
 
     processed_again = run_batch_scoring(batch_size=1, connection=db_connection)
     assert processed_again == 0

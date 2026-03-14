@@ -188,6 +188,8 @@ def test_segment_detail_endpoint_returns_full_detail(db_connection) -> None:
     assert payload["ai_confidence"] == 0.42
     assert payload["osm_tags"]["highway"] == "footway"
     assert payload["display_name"] == "Footway"
+    assert "factors" in payload
+    assert isinstance(payload["factors"], dict)
     assert "geometry" in payload
     assert payload["geometry"]["type"] == "LineString"
 
