@@ -140,7 +140,7 @@ describe("MapView score breakdown", () => {
 
     const map = (window as { __walkmap__?: { map?: { __triggerClick?: (point: { x: number; y: number }) => void } } })
       .__walkmap__?.map;
-    map?.__triggerClick({ x: 0, y: 0 });
+    map?.__triggerClick?.({ x: 0, y: 0 });
 
     await screen.findByText("Segment Detail");
     const breakdownButton = screen.getByRole("button", { name: /score breakdown/i });
@@ -190,7 +190,7 @@ describe("MapView score breakdown", () => {
 
     const map = (window as { __walkmap__?: { map?: { __triggerClick?: (point: { x: number; y: number }) => void } } })
       .__walkmap__?.map;
-    map?.__triggerClick({ x: 0, y: 0 });
+    map?.__triggerClick?.({ x: 0, y: 0 });
 
     await screen.findByText("Segment Detail");
     fireEvent.click(screen.getByRole("button", { name: /score breakdown/i }));
@@ -233,7 +233,7 @@ describe("MapView score breakdown", () => {
 
     const map = (window as { __walkmap__?: { map?: { __triggerClick?: (point: { x: number; y: number }) => void } } })
       .__walkmap__?.map;
-    map?.__triggerClick({ x: 0, y: 0 });
+    map?.__triggerClick?.({ x: 0, y: 0 });
 
     await screen.findByText("Segment Detail");
     fireEvent.click(screen.getByRole("button", { name: /score breakdown/i }));
