@@ -46,38 +46,45 @@ def score_segment(
 
     highway = osm_tags.get("highway")
     if _tag_in(highway, {"footway", "path", "residential", "living_street", "pedestrian"}):
-        factors["road_type_positive"] = 1.0
-        score += weights.get("road_type_positive", 0.0)
+        contribution = weights.get("road_type_positive", 0.0)
+        factors["road_type_positive"] = contribution
+        score += contribution
     if _tag_in(highway, {"motorway", "trunk", "primary"}):
-        factors["road_type_negative"] = 1.0
-        score += weights.get("road_type_negative", 0.0)
+        contribution = weights.get("road_type_negative", 0.0)
+        factors["road_type_negative"] = contribution
+        score += contribution
 
     sidewalk = osm_tags.get("sidewalk")
     if _tag_in(sidewalk, {"both", "left", "right", "yes"}):
-        factors["sidewalk_positive"] = 1.0
-        score += weights.get("sidewalk_positive", 0.0)
+        contribution = weights.get("sidewalk_positive", 0.0)
+        factors["sidewalk_positive"] = contribution
+        score += contribution
     if _tag_in(sidewalk, {"no"}):
-        factors["sidewalk_negative"] = 1.0
-        score += weights.get("sidewalk_negative", 0.0)
+        contribution = weights.get("sidewalk_negative", 0.0)
+        factors["sidewalk_negative"] = contribution
+        score += contribution
 
     surface = osm_tags.get("surface")
     if _tag_in(surface, {"paved", "asphalt", "cobblestone", "paving_stones"}):
-        factors["surface_positive"] = 1.0
-        score += weights.get("surface_positive", 0.0)
+        contribution = weights.get("surface_positive", 0.0)
+        factors["surface_positive"] = contribution
+        score += contribution
     if _tag_in(surface, {"dirt", "gravel", "sand", "ground", "mud"}):
-        factors["surface_negative"] = 1.0
-        score += weights.get("surface_negative", 0.0)
+        contribution = weights.get("surface_negative", 0.0)
+        factors["surface_negative"] = contribution
+        score += contribution
 
     if _has_tree_cover(osm_tags, nearby_pois):
-        factors["tree_cover"] = 1.0
-        score += weights.get("tree_cover", 0.0)
+        contribution = weights.get("tree_cover", 0.0)
+        factors["tree_cover"] = contribution
+        score += contribution
 
     waterfront_distance = _waterfront_distance_m(osm_tags, nearby_pois, water_distance_m)
     waterfront_bonus, waterfront_factor = _waterfront_bonus(
         waterfront_distance, weights.get("waterfront", 0.0)
     )
     if waterfront_bonus:
-        factors["waterfront"] = waterfront_factor
+        factors["waterfront"] = waterfront_bonus
         score += waterfront_bonus
 
     business_count = _business_poi_count(nearby_pois)
@@ -87,16 +94,19 @@ def score_segment(
         score += business_bonus
 
     if _is_park_adjacent(osm_tags, nearby_pois):
-        factors["park_adjacency"] = 1.0
-        score += weights.get("park_adjacency", 0.0)
+        contribution = weights.get("park_adjacency", 0.0)
+        factors["park_adjacency"] = contribution
+        score += contribution
 
     if _is_industrial(osm_tags, nearby_pois):
-        factors["industrial_landuse"] = 1.0
-        score += weights.get("industrial_landuse", 0.0)
+        contribution = weights.get("industrial_landuse", 0.0)
+        factors["industrial_landuse"] = contribution
+        score += contribution
 
     if _is_residential(osm_tags):
-        factors["residential_landuse"] = 1.0
-        score += weights.get("residential_landuse", 0.0)
+        contribution = weights.get("residential_landuse", 0.0)
+        factors["residential_landuse"] = contribution
+        score += contribution
 
     residential_refinement = _residential_refinement_modifier(osm_tags)
     if residential_refinement:
@@ -105,17 +115,18 @@ def score_segment(
 
     maxspeed_limit = thresholds.get("speed_limit_mph", 45)
     if _maxspeed_over(osm_tags.get("maxspeed"), maxspeed_limit):
-        factors["speed_limit"] = 1.0
-        score += weights.get("speed_limit", 0.0)
+        contribution = weights.get("speed_limit", 0.0)
+        factors["speed_limit"] = contribution
+        score += contribution
 
-    adjustment_raw = osm_tags.get("walkmap_score_adjustment")
+    adjustment_raw = osm_tags.get("walkmap_sidewalk_penalty")
     if adjustment_raw is not None:
         try:
             adjustment = float(adjustment_raw)
         except (TypeError, ValueError):
             adjustment = 0.0
         if adjustment:
-            factors["walkmap_score_adjustment"] = adjustment
+            factors["walkmap_sidewalk_penalty"] = adjustment
             score += adjustment
 
     score = max(0.0, min(100.0, score))

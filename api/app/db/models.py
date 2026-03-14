@@ -48,6 +48,11 @@ class Segment(Base):
     ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     user_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     composite_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    factors: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     rating_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     vibe_tag_counts: Mapped[dict] = mapped_column(

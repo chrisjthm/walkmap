@@ -17,6 +17,7 @@ type SegmentProperties = {
   verified?: boolean;
   rating_count?: number;
   vibe_tag_counts?: Record<string, number>;
+  factors?: Record<string, number>;
 };
 
 type SegmentFeature = {
@@ -40,6 +41,7 @@ type SegmentDetail = {
   verified: boolean;
   ratingCount: number;
   vibeTags: Array<[string, number]>;
+  factors: Record<string, number>;
 };
 
 const EMPTY_SEGMENTS: SegmentCollection = {
@@ -53,6 +55,51 @@ const BASE_SCORE_COLOR_EXPRESSION = buildScoreExpression(
 ) as maplibregl.ExpressionSpecification;
 
 const JERSEY_CITY_CENTER: [number, number] = [-74.036, 40.7178];
+
+const FACTOR_LABELS: Record<string, string> = {
+  road_type_positive: "Walkable road type",
+  road_type_negative: "Major roadway penalty",
+  sidewalk_positive: "Sidewalks present",
+  sidewalk_negative: "Sidewalks missing",
+  surface_positive: "Paved surface",
+  surface_negative: "Unpaved surface",
+  tree_cover: "Tree cover",
+  waterfront: "Waterfront proximity",
+  business_density: "Business density",
+  park_adjacency: "Park adjacency",
+  industrial_landuse: "Industrial landuse",
+  residential_landuse: "Residential street",
+  residential_refinement: "Residential refinement",
+  speed_limit: "High speed limit",
+  walkmap_sidewalk_penalty: "Residential street without sidewalks",
+};
+
+const formatFactorLabel = (key: string) => {
+  if (FACTOR_LABELS[key]) {
+    return FACTOR_LABELS[key];
+  }
+  return key
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
+const formatFactorValue = (value: number) => {
+  const sign = value >= 0 ? "+" : "-";
+  const abs = Math.abs(value);
+  const rounded = Number.isInteger(abs) ? abs.toFixed(0) : abs.toFixed(1);
+  return `${sign}${rounded}`;
+};
+
+const buildRatingBlendText = (ratingCount: number) => {
+  if (ratingCount <= 0) {
+    return "Score is AI-estimated - no user ratings yet";
+  }
+  if (ratingCount < 5) {
+    return `Score is a blend of AI estimate and ${ratingCount} user rating(s)`;
+  }
+  return "Score is based entirely on user ratings";
+};
 
 const getApiBase = () => {
   const rawBase = import.meta.env.VITE_API_BASE_URL;
@@ -219,6 +266,7 @@ const buildDetail = (props: SegmentProperties): SegmentDetail => {
   const verified = Boolean(props.verified);
   const ratingCount = Number(props.rating_count ?? 0);
   const tagCounts = props.vibe_tag_counts ?? {};
+  const factors = props.factors ?? {};
   const vibeTags = Object.entries(tagCounts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4);
@@ -230,6 +278,7 @@ const buildDetail = (props: SegmentProperties): SegmentDetail => {
     verified,
     ratingCount,
     vibeTags,
+    factors,
   };
 };
 
@@ -243,6 +292,7 @@ export default function MapView() {
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<SegmentDetail | null>(null);
+  const [showScoreBreakdown, setShowScoreBreakdown] = useState(false);
   const [segmentsError, setSegmentsError] = useState(false);
   const [scoreLegend, setScoreLegend] = useState<ScoreLegend>({
     min: 0,
@@ -251,6 +301,10 @@ export default function MapView() {
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  useEffect(() => {
+    setShowScoreBreakdown(false);
+  }, [selectedDetail?.id]);
+
   const apiBase = useMemo(() => getApiBase(), []);
   const styleUrl = useMemo(
     () =>
@@ -258,6 +312,21 @@ export default function MapView() {
       "https://tiles.openfreemap.org/styles/liberty",
     [],
   );
+
+  const scoreBreakdownId = selectedDetail ? `score-breakdown-${selectedDetail.id}` : undefined;
+  const ratingBlendText = selectedDetail
+    ? buildRatingBlendText(selectedDetail.ratingCount)
+    : "";
+  const factorRows = selectedDetail
+    ? Object.entries(selectedDetail.factors)
+        .filter(([, value]) => Boolean(value))
+        .map(([key, value]) => ({
+          key,
+          label: formatFactorLabel(key),
+          value,
+          formatted: formatFactorValue(value),
+        }))
+    : [];
 
   const updateLayerVisibility = useCallback((map: maplibregl.Map) => {
     const verifiedVisibility = overlayVisible ? "visible" : "none";
@@ -641,14 +710,49 @@ export default function MapView() {
             </button>
           </div>
           <div className="mt-3 grid gap-2 text-sm text-mist">
-            <p>
-              Score: <span className="text-sun">{selectedDetail.score}</span>
-            </p>
+            <div className="score-row">
+              <p>
+                Score: <span className="text-sun">{selectedDetail.score}</span>
+              </p>
+              <button
+                className="score-info-button"
+                type="button"
+                aria-label="Score breakdown"
+                aria-expanded={showScoreBreakdown}
+                aria-controls={scoreBreakdownId}
+                onClick={() => setShowScoreBreakdown((prev) => !prev)}
+              >
+                ⓘ
+              </button>
+            </div>
             <p>
               Status: {selectedDetail.verified ? "Verified" : "Unverified"}
             </p>
             <p>Ratings: {selectedDetail.ratingCount}</p>
           </div>
+          {showScoreBreakdown && (
+            <div id={scoreBreakdownId} className="score-breakdown">
+              <div className="score-section">
+                <p className="score-section-title">AI factors</p>
+                {factorRows.length > 0 ? (
+                  <ul className="score-factor-list">
+                    {factorRows.map((factor) => (
+                      <li key={factor.key} className="score-factor-row">
+                        <span>{factor.label}</span>
+                        <span className="score-factor-value">{factor.formatted}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="score-empty">No AI factors available.</p>
+                )}
+              </div>
+              <div className="score-section">
+                <p className="score-section-title">User ratings</p>
+                <p className="score-user-text">{ratingBlendText}</p>
+              </div>
+            </div>
+          )}
           {selectedDetail.vibeTags.length > 0 && (
             <div className="segment-tags">
               {selectedDetail.vibeTags.map(([tag, count]) => (

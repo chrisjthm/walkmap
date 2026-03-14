@@ -193,7 +193,7 @@ class OSMDataProvider:
                     continue
                 if not has_sidewalk_tag:
                     osm_tags = dict(osm_tags)
-                    osm_tags["walkmap_score_adjustment"] = -15.0
+                    osm_tags["walkmap_sidewalk_penalty"] = -15.0
                 segments.append(
                     SegmentRecord(
                         segment_id=segment_id,
