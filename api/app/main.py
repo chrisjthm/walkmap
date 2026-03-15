@@ -1,7 +1,7 @@
 import json
 import logging
-from contextlib import asynccontextmanager
 import os
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Any
 
@@ -20,12 +20,12 @@ from app.ingest import (
     ingest_segments,
     ingest_water_features,
 )
+from app.routing_graph import refresh_graph
 from app.score_batch import run_batch_scoring
 from app.segments_display import (
     display_name_from_osm_tags,
     display_name_from_values,
 )
-from app.routing_graph import refresh_graph
 
 logging.basicConfig(level=logging.INFO)
 

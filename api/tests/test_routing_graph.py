@@ -4,6 +4,8 @@ import json
 
 from sqlalchemy import text
 
+import logging
+
 from app.routing_graph import refresh_graph
 
 
@@ -163,8 +165,9 @@ def test_refresh_graph_logs_disconnected_components(db_connection, caplog) -> No
         osm_tags={"highway": "footway"},
     )
 
-    caplog.set_level("WARNING", logger="app.routing_graph")
-    cache = refresh_graph(connection=db_connection)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="app.routing_graph"):
+        cache = refresh_graph(connection=db_connection)
 
     assert cache.component_count >= 2
     assert any("disconnected components" in record.message for record in caplog.records)

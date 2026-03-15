@@ -8,12 +8,12 @@ from typing import Any, Iterable, Protocol
 
 from geoalchemy2.shape import from_shape
 from sqlalchemy import Connection, Engine, create_engine
-
-_ENGINE: Engine | None = None
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import func
 
 from app.db.models import Park, Poi, Segment, WaterFeature
+
+_ENGINE: Engine | None = None
 
 DEFAULT_BBOX = {
     "north": 40.7282,
