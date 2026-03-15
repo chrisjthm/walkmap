@@ -41,7 +41,7 @@ E (mock) ───────┘
 
 ## Stream A — Infrastructure & DevOps
 
-### A1 — Docker Compose Local Environment
+### A1 — Docker Compose Local Environment [COMPLETED]
 
 **Description:**
 Set up a Docker Compose configuration that spins up all local development dependencies with a single `docker compose up` command. This is the foundation every other stream depends on.
@@ -68,7 +68,7 @@ Include a `.env.example` file documenting all required environment variables (DB
 
 ---
 
-### A2 — Database Schema & Migrations
+### A2 — Database Schema & Migrations [COMPLETED]
 
 **Description:**
 Define the full PostgreSQL schema using Alembic for migrations. All geospatial columns must use PostGIS types. Schema must match the data model in spec Section 6.2.
@@ -102,7 +102,7 @@ Indexes required:
 
 ---
 
-### A3 — CI Pipeline
+### A3 — CI Pipeline [COMPLETED]
 
 **Description:**
 Set up a GitHub Actions workflow that runs on every pull request and push to `main`.
@@ -126,11 +126,92 @@ Jobs:
 
 ---
 
+### A4 — Backend Hosting: Railway (or Render)
+
+**Description:**
+Deploy the FastAPI backend to Railway (recommended) or Render. Both offer free tiers sufficient for personal MVP usage. Railway is preferred for its simpler Postgres add-on flow, but since you're running PostGIS you'll need to confirm the Postgres instance supports the PostGIS extension — Railway's default Postgres does, Render's free tier does not (use Render's paid tier or a separate Supabase instance if choosing Render).
+
+**Setup steps:**
+- Connect the GitHub repo to Railway
+- Add a Railway Postgres instance with PostGIS enabled (verify with `SELECT PostGIS_Version()` after provisioning)
+- Set all required environment variables (DB connection string, JWT secret) in the Railway dashboard
+- Configure the start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Run `alembic upgrade head` as a one-time deploy step (Railway supports release commands)
+- Run the B1 ingest script and B3 batch scorer as one-time jobs after the first deploy
+- Set up a `/health` endpoint check in Railway so the service restarts automatically on crash
+
+**Completion criteria:**
+- API is reachable at a public Railway URL
+- `GET /health` returns `{"status": "ok"}`
+- PostGIS is available and the `segments` table is populated with scored Jersey City data
+- Environment variables are set via the Railway dashboard, not committed to the repo
+- Alembic migrations run automatically on each deploy before the app starts accepting requests
+
+**Test cases:**
+1. `curl https://<railway-url>/health` → `{"status": "ok"}`
+2. `curl https://<railway-url>/segments?bbox=...` → returns Jersey City segments with scores
+3. Commit a change, push to `main` → Railway auto-deploys, service remains available during deploy
+4. Check Railway logs → no startup errors, segment cache load confirmed in logs
+5. Verify no secrets are present in the repo (`git grep` for JWT secret and DB password returns nothing)
+
+---
+
+### A5 — Frontend Hosting: Vercel
+
+**Description:**
+Deploy the React frontend to Vercel. Vercel's free tier handles this with zero configuration for Vite-based React projects. The main task is connecting the frontend to the deployed backend URL via an environment variable rather than a hardcoded localhost reference.
+
+**Setup steps:**
+- Connect the GitHub repo to Vercel (can be the same monorepo — set the root directory to the frontend folder)
+- Add `VITE_API_BASE_URL` environment variable in the Vercel dashboard pointing to the Railway backend URL
+- Add `VITE_MAP_STYLE_URL` for the OpenFreeMap tile URL if not already defaulted in code
+- Confirm Vercel build command is `npm run build` and output directory is `dist`
+- Enable automatic deploys on push to `main`
+
+**Completion criteria:**
+- Frontend is reachable at a public Vercel URL
+- Map loads with OpenFreeMap tiles and segment overlay renders with real data from the Railway backend
+- No hardcoded `localhost` references remain in the frontend codebase
+- Environment variables are set in the Vercel dashboard, not committed to the repo
+- Pushing to `main` triggers an automatic Vercel deploy
+
+**Test cases:**
+1. Visit the Vercel URL → map loads, segments visible over Jersey City
+2. Click a segment → detail panel appears with real score data from the Railway API
+3. Open browser Network tab → API calls go to the Railway URL, not localhost
+4. Push a frontend change to `main` → Vercel auto-deploys within 2 minutes
+5. Verify no `localhost` strings present in the built output (`grep -r "localhost" dist/` returns nothing)
+
+---
+
+### A6 — Domain & HTTPS (Optional MVP)
+
+**Description:**
+Both Railway and Vercel provide auto-generated HTTPS URLs out of the box (`*.up.railway.app` and `*.vercel.app`), so this task is optional for personal MVP use. Only needed if you want a custom domain.
+
+If desired:
+- Purchase a domain (Namecheap or Cloudflare Registrar are cheap and straightforward)
+- Point the domain to the Vercel frontend via a CNAME record
+- Add the custom domain in the Vercel dashboard — Vercel handles SSL certificate provisioning automatically via Let's Encrypt
+- Optionally add a subdomain for the API (e.g. `api.walkmap.dev`) via Railway's custom domain settings
+
+**Completion criteria:**
+- Frontend reachable at custom domain over HTTPS
+- SSL certificate is valid and auto-renewing
+- API reachable at `api.<domain>` if a custom API subdomain is desired
+
+**Test cases:**
+1. Visit `https://<custom-domain>` → loads correctly, no SSL warning
+2. `curl -I https://<custom-domain>` → `200 OK`, `strict-transport-security` header present
+3. SSL certificate expiry is > 60 days and set to auto-renew
+
+---
+
 ## Stream B — Data Ingest & AI Scoring
 
 *Depends on: A1, A2*
 
-### B1 — OSM Data Ingest Pipeline
+### B1 — OSM Data Ingest Pipeline [COMPLETED]
 
 **Description:**
 Build a Python script (runnable as a CLI command and as a FastAPI background task) that fetches all pedestrian-navigable street segments within a bounding box using OSMnx, decomposes them into individual node-to-node segments, and stores them in the `segments` table.
@@ -162,7 +243,7 @@ Key implementation notes:
 
 ---
 
-### B1.1 — Ingest: Pedestrian-First Segment Filtering
+### B1.1 — Ingest: Pedestrian-First Segment Filtering [COMPLETED]
 
 **Description:**
 Reverts and replaces the sidewalk suppression logic from C2.2. Rather than suppressing parallel footway segments at the API layer, apply correct inclusion/exclusion rules at ingest time so the dataset only contains segments relevant to a pedestrian walk planner. Roads are largely noise on a walk map — the core dataset should be the pedestrian network, with road carriageways included only as a fallback where no better walking surface exists.
@@ -199,7 +280,7 @@ Remove the C2.2 suppression logic from the segments API entirely once this task 
 
 ---
 
-### B2 — AI Scoring Engine
+### B2 — AI Scoring Engine [COMPLETED]
 
 **Description:**
 Implement the scoring function defined in spec Section 7. This is a pure Python function — no external API calls, no database access. It operates entirely on data passed in as arguments.
@@ -241,7 +322,7 @@ Also implement `update_composite_score()` which applies the blending formula fro
 
 ---
 
-### B2.1 — Scoring: Waterfront Proximity Gradient
+### B2.1 — Scoring: Waterfront Proximity Gradient [COMPLETED]
 
 **Description:**
 Replace the binary waterfront proximity check with a distance-band gradient. Query `ST_Distance` from the segment midpoint to the nearest `natural=water`, `waterway=*`, or `leisure=marina` feature in the OSM data. Apply a tiered bonus:
@@ -270,7 +351,7 @@ The Hudson River promenade in Jersey City should be the clearest beneficiary —
 
 ---
 
-### B2.2 — Scoring: POI Density Gradient
+### B2.2 — Scoring: POI Density Gradient [COMPLETED]
 
 **Description:**
 Replace the flat POI proximity bonus with a tiered count-based score. Count OSM POIs (restaurants, cafes, bars, shops, amenities) within 50m of the segment midpoint and apply progressive bonuses:
@@ -298,7 +379,7 @@ Cap the bonus at +22 to avoid over-rewarding extremely dense commercial corridor
 
 ---
 
-### B2.3 — Scoring: Residential Street Refinement
+### B2.3 — Scoring: Residential Street Refinement [COMPLETED]
 
 **Description:**
 Currently all `highway=residential` segments score the same. Add sub-classification logic that penalizes residential streets with high-traffic characteristics:
@@ -409,8 +490,6 @@ Known ground truth anchors for Jersey City:
 
 ---
 
-That’s a solid cleanup idea — here’s a concise markdown subtask you can drop into the task list.
-
 ### B2.7 — Scoring: Externalize All Numeric Factors
 
 **Description:**  
@@ -429,7 +508,7 @@ Move all numeric scoring values (base score, additions/subtractions, multipliers
 1. Changing a value in YAML (e.g., `base_score`) changes output without code changes.
 2. Removing a numeric constant in code doesn’t alter test outputs unless YAML changes.
 
-### B3 — Batch Scoring Runner
+### B3 — Batch Scoring Runner [COMPLETED]
 
 **Description:**
 Build a CLI script and FastAPI background task that:
@@ -489,7 +568,7 @@ JWT should be 24-hour expiry. A `get_current_user` FastAPI dependency must be im
 
 ---
 
-### C2 — Segments API
+### C2 — Segments API [COMPLETED]
 
 **Description:**
 Endpoints for fetching segment data to power the map overlay and detail panel.
@@ -517,7 +596,7 @@ The bbox endpoint must use PostGIS `ST_Intersects` for spatial filtering. Each G
 
 ---
 
-### C2.1 — Segments API: Street Name in Response
+### C2.1 — Segments API: Street Name in Response [COMPLETED]
 
 **Description:**
 Update `GET /segments` and `GET /segments/{id}` to include a human-readable `display_name` field in each feature's GeoJSON properties. Extract from `osm_tags` in priority order:
@@ -541,7 +620,7 @@ This fallback hierarchy must be applied server-side so the frontend never has to
 
 ---
 
-### C2.2 — Segments API: Sidewalk Deduplication in Map Response
+### C2.2 — Segments API: Sidewalk Deduplication in Map Response [COMPLETED]
 
 **Description:**
 OSM models mapped sidewalks as separate `highway=footway` ways running parallel to their parent carriageway, tagged with `footway=sidewalk` and sometimes `sidewalk:of=<parent street name>`. This causes the map overlay to render three parallel lines for any street with mapped sidewalks — the carriageway plus two footways — where visually only one line is needed.
@@ -801,7 +880,7 @@ Preference for segments adjacent to already-verified high-scoring segments is im
 
 *Can begin immediately with mocked API responses. Full integration requires C2, C3, C4.*
 
-### E1 — Project Setup & Base Layout
+### E1 — Project Setup & Base Layout [COMPLETED]
 
 **Description:**
 Initialize the React + TypeScript frontend with Vite. Configure Tailwind CSS, React Query, and React Router. Establish the base layout: a full-screen map area with a collapsible side panel.
@@ -831,7 +910,7 @@ Routes:
 
 ---
 
-### E2 — Map View & Aesthetic Overlay
+### E2 — Map View & Aesthetic Overlay [COMPLETED]
 
 **Description:**
 Implement the map view using MapLibre GL JS with OpenFreeMap tiles. Street segments are rendered as a colored line layer sourced from `GET /segments?bbox=...`.
@@ -880,7 +959,7 @@ Update the segment detail panel to display `display_name` from the API response 
 2. Click an unnamed footpath → panel shows "Footway", not "Unnamed segment"
 3. Click any segment → a non-empty `display_name` is always shown
 
-### E2.2 — Map: Performance & Visibility Polish
+### E2.2 — Map: Performance & Visibility Polish [COMPLETED]
 
 **Description:**
 Four UX issues to address: slow segment loading on initial load, 3D building extrusion making the overlay hard to read, insufficient click feedback on segment selection, and the detail panel failing to appear unless the side panel is already open.
@@ -940,7 +1019,7 @@ Ensure the segment detail panel opens on click even when the side panel is close
 
 ---
 
-### E2.4 — Map: Viewport-Relative Score Gradient
+### E2.4 — Map: Viewport-Relative Score Gradient [COMPLETED]
 
 **Description:**
 Rather than mapping the score color gradient against a fixed global scale (0–100), normalize the gradient against the distribution of scores currently visible in the viewport. A segment that scores 72 in a high-scoring area like Downtown Jersey City will render as a mid-range yellow rather than deep green, making local differentiation meaningful for routing decisions.
@@ -979,7 +1058,7 @@ This means the gradient always stretches to fill the full green → red range ac
 
 ---
 
-### E2.5 — Map: Score Transparency Indicator in Segment Detail Panel
+### E2.5 — Map: Score Transparency Indicator in Segment Detail Panel [COMPLETED]
 
 **Description:**
 Add a small info icon (ⓘ) adjacent to the score in the segment detail panel. Tapping or hovering the icon reveals a breakdown of how the composite score was calculated — both the AI scoring factors and the user rating contribution. This builds trust in the scoring system and helps users understand why a segment scored the way it did.
@@ -1048,6 +1127,150 @@ UI components:
 4. "Use my location" → browser geolocation API triggered, coordinates populate start field
 5. Mock API returning a 500 error → user sees a friendly error message, not a blank panel
 6. Distance slider at 1 mile → route cards show approximately 1 mile; at 5 miles → approximately 5 miles
+
+---
+
+### E3.1 — Active Walk: Location Tracking
+**Complexity: Low**
+
+**Description:**
+Acquire the user's GPS position continuously while a walk is active using the browser Geolocation API (`watchPosition`). Location tracking should only run during an active walk session — not on the map view or route planning screens — to respect battery and privacy.
+
+**Implementation notes:**
+- Use `navigator.geolocation.watchPosition()` with `enableHighAccuracy: true` and a `maximumAge` of 5 seconds
+- Store the active watch ID in React context so it can be cleared on walk end or component unmount
+- If the user denies location permission, show a clear message explaining that location access is required for active walk mode — the rest of the app (map view, route planning, ratings) should remain fully functional without it
+- Accuracy threshold: ignore position updates with `coords.accuracy > 30m` to filter out GPS drift — use the last known good position instead
+- Expose current position, accuracy, and a `locationAvailable` boolean via a `useLocation` hook consumed by E3.2 and E3.3
+
+**Completion criteria:**
+- `watchPosition` is started when a walk begins and cleared when the walk ends or the component unmounts
+- Position updates with accuracy > 30m are ignored
+- Location permission denial shows a user-facing message without breaking the rest of the app
+- Current position is accessible to other components via `useLocation` hook
+
+**Test cases:**
+1. Start a walk → `watchPosition` is active (confirm in browser devtools geolocation panel)
+2. End a walk → `watchPosition` is cleared, no further position updates consumed
+3. Navigate away from active walk screen → watch is cleared, no memory leak
+4. Mock a position update with `accuracy: 50` → ignored, last good position retained
+5. Mock a position update with `accuracy: 15` → accepted, `useLocation` reflects new position
+6. Deny location permission → user sees a clear explanation; map view and route planning still work normally
+
+---
+
+### E3.2 — Active Walk: Route Progress Tracking
+
+**Complexity: High**
+
+**Description:**
+Match the user's current GPS position to the active route's ordered segment list to determine which segment they are currently on, which segments are completed, and whether they have deviated from the route.
+
+**Progress logic:**
+- Snap the user's current position to the nearest segment in the route using `ST_Distance` (or a client-side equivalent using the GeoJSON geometries already in memory)
+- A segment is marked **completed** when the user's snapped position passes the segment's end node (within 15m)
+- Segments are marked **upcoming**, **current**, or **completed** and this state is stored in React context for use by the map layer (E3.3) and the rating prompt (E3.4)
+
+**Deviation detection:**
+- If the user's position is > 50m from the nearest point on any segment in the active route, trigger the deviation flow
+- Halt route progress (stop marking segments as completed)
+- Show a prompt: "You've left the route. Would you like a new route from your current position?"
+- If the user confirms: call `POST /routes/suggest` with the current position as the new start point and the original destination/mode/priority settings, replace the active route
+- If the user dismisses: resume progress tracking from wherever they rejoin the route
+
+**Completion criteria:**
+- Current segment updates correctly as the user moves along the route
+- Segments transition from upcoming → current → completed at the correct geographic positions
+- Deviation prompt appears when position is > 50m from the route, not before
+- Confirming re-route fetches a new route from the current position with original parameters
+- Dismissing the deviation prompt resumes tracking without resetting completed segments
+
+**Test cases:**
+1. Simulate position moving along a known route → segments transition upcoming → current → completed in order
+2. Simulate position 30m from route → no deviation prompt triggered
+3. Simulate position 60m from route → deviation prompt appears, route progress halted
+4. Confirm re-route → `POST /routes/suggest` called with current position, new route rendered
+5. Dismiss deviation prompt → completed segments remain completed, tracking resumes
+6. User walks the entire route → all segments marked completed, walk-end flow triggered
+
+---
+
+### E3.3 — Active Walk: Map UI State
+
+**Complexity: Medium**
+
+**Description:**
+Implement a distinct map mode for active walks. The map should reflect route progress visually and follow the user's position in real time.
+
+**Visual state:**
+- Completed segments: render in a muted/grey color to indicate they have been walked
+- Current segment: render with a bright highlight (distinct from the score-based color) so the user can clearly see where they are on the route
+- Upcoming segments: render in the standard score-based color gradient
+- User position: render as a pulsing dot (standard map location indicator)
+- Map auto-centers on the user's position on each location update, with a smooth animation. The user can pan freely but the map re-centers after 5 seconds of inactivity.
+
+**Implementation notes:**
+- Use separate MapLibre layers for completed, current, and upcoming segments filtered by segment state from E3.2
+- The score-based overlay from E2 should be suppressed for route segments during an active walk — the progress state takes visual priority
+- A persistent bottom bar should show: total distance walked, distance remaining, elapsed time
+- An "End Walk" button should be clearly accessible without requiring the side panel to be open
+
+**Completion criteria:**
+- Completed, current, and upcoming segments render in visually distinct styles
+- Map follows user position with smooth animation during an active walk
+- User can pan the map freely; it re-centers after 5 seconds of inactivity
+- Bottom bar shows accurate distance walked, distance remaining, and elapsed time
+- "End Walk" button visible and accessible at all times during an active walk
+
+**Test cases:**
+1. Start a walk → user position dot appears on map, map centers on it
+2. Simulate progress along route → completed segments turn grey, current segment highlights, upcoming segments retain score colors
+3. Pan the map manually → map stays on panned position; after 5 seconds with no interaction → re-centers on user position
+4. Bottom bar distance walked updates as position advances along the route
+5. Elapsed time increments correctly from walk start
+6. "End Walk" button visible without opening the side panel; tapping it ends the walk and triggers the post-walk rating flow (E3.4)
+
+---
+
+### E3.4 — Active Walk: Segment Rating Prompts
+
+**Complexity: Medium**
+
+**Description:**
+Surface an unobtrusive rating nudge when the user completes a segment, allowing them to rate it in the moment without interrupting their walk. Ratings captured mid-walk are the highest quality signal — the user has just experienced that specific block.
+
+**Prompt behavior:**
+- When a segment transitions to completed (E3.2), show a small toast/banner at the bottom of the screen (above the progress bar) with the segment name and thumbs up / thumbs down buttons
+- The toast auto-dismisses after 8 seconds if not interacted with
+- The toast can be manually dismissed at any time
+- Only one toast is shown at a time — if the user completes a second segment before dismissing the first, the first is replaced
+- If the user taps thumbs up or thumbs down, optionally expand inline to show vibe tag chips before submitting — keep this expansion brief and dismissible
+- Ratings submitted mid-walk call `POST /ratings` immediately (no need to wait for walk end)
+- Segments not rated mid-walk are surfaced in the post-walk rating prompt (spec Section 5.4) after the walk ends
+
+**Implementation notes:**
+- The toast must not obscure the current segment highlight or the user position dot
+- Unauthenticated users should not see the rating prompt — silently skip it
+- The vibe tag expansion is optional; the user can submit with just a thumbs up/down and no tags
+
+**Completion criteria:**
+- Toast appears within 2 seconds of a segment being marked completed
+- Toast auto-dismisses after 8 seconds if not interacted with
+- Tapping thumbs up or thumbs down submits a rating and dismisses the toast
+- Only one toast visible at a time; completing a new segment replaces the current toast
+- Segments skipped mid-walk appear in the post-walk prompt
+- Toast does not appear for unauthenticated users
+
+
+**Test cases:**
+1. Simulate segment completion → toast appears within 2 seconds showing segment name and thumbs buttons
+2. Wait 8 seconds without interaction → toast auto-dismisses
+3. Tap the X button → toast dismisses immediately
+4. Complete a second segment while first toast is still visible → first toast replaced by second
+5. Tap thumbs up → `POST /ratings` called with correct segment ID and `thumbs_up: true`, toast dismisses
+6. Tap thumbs up → vibe tag chips appear; select "Scenic", tap submit → rating submitted with tag, toast dismisses
+7. Skip rating on 3 segments mid-walk, end walk → all 3 appear in post-walk rating prompt
+8. Not logged in → no toast appears on segment completion
 
 ---
 

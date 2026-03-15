@@ -1,4 +1,6 @@
 import json
+import logging
+from contextlib import asynccontextmanager
 import os
 from functools import lru_cache
 from typing import Any
@@ -11,6 +13,7 @@ from app.ingest import (
     DEFAULT_BBOX,
     BoundingBox,
     OSMDataProvider,
+    dispose_engine,
     get_engine,
     ingest_parks,
     ingest_pois,
@@ -22,8 +25,22 @@ from app.segments_display import (
     display_name_from_osm_tags,
     display_name_from_values,
 )
+from app.routing_graph import refresh_graph
 
-app = FastAPI(title="Walkmap API")
+logging.basicConfig(level=logging.INFO)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Handle startup/shutdown events for the API."""
+    refresh_graph()
+    try:
+        yield
+    finally:
+        dispose_engine()
+
+
+app = FastAPI(title="Walkmap API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +52,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 
 
 def _parse_bbox(value: str) -> tuple[float, float, float, float]:

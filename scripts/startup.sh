@@ -1,5 +1,5 @@
 docker compose up --build -d
-sleep 5
+sleep 10
 ./scripts/db-migrate.sh
 ./scripts/ingest-osm.sh
 ./scripts/score-batch.sh

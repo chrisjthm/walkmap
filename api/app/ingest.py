@@ -8,6 +8,8 @@ from typing import Any, Iterable, Protocol
 
 from geoalchemy2.shape import from_shape
 from sqlalchemy import Connection, Engine, create_engine
+
+_ENGINE: Engine | None = None
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql import func
 
@@ -100,10 +102,7 @@ class OSMDataProvider:
         from shapely.ops import linemerge
 
         graph = ox.graph_from_bbox(
-            bbox.north,
-            bbox.south,
-            bbox.east,
-            bbox.west,
+            bbox=(bbox.north, bbox.south, bbox.east, bbox.west),
             network_type="walk",
         )
         edges = ox.graph_to_gdfs(graph, nodes=False, edges=True)
@@ -213,10 +212,7 @@ class OSMDataProvider:
             "landuse": ["grass", "recreation_ground"],
         }
         gdf = ox.features_from_bbox(
-            bbox.north,
-            bbox.south,
-            bbox.east,
-            bbox.west,
+            bbox=(bbox.north, bbox.south, bbox.east, bbox.west),
             tags=tags,
         )
         if gdf.empty:
@@ -269,10 +265,7 @@ class OSMDataProvider:
             "leisure": ["marina"],
         }
         gdf = ox.features_from_bbox(
-            bbox.north,
-            bbox.south,
-            bbox.east,
-            bbox.west,
+            bbox=(bbox.north, bbox.south, bbox.east, bbox.west),
             tags=tags,
         )
         if gdf.empty:
@@ -324,10 +317,7 @@ class OSMDataProvider:
             "shop": True,
         }
         gdf = ox.features_from_bbox(
-            bbox.north,
-            bbox.south,
-            bbox.east,
-            bbox.west,
+            bbox=(bbox.north, bbox.south, bbox.east, bbox.west),
             tags=tags,
         )
         if gdf.empty:
@@ -546,11 +536,23 @@ def _has_parallel_sidewalk(
 
 
 def get_engine() -> Engine:
-    """Create a SQLAlchemy engine from DATABASE_URL with a short connect timeout."""
+    """Return a cached SQLAlchemy engine with a short connect timeout."""
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not set")
-    return create_engine(database_url, connect_args={"connect_timeout": 5})
+    global _ENGINE
+    if _ENGINE is None:
+        _ENGINE = create_engine(database_url, connect_args={"connect_timeout": 5})
+    return _ENGINE
+
+
+def dispose_engine() -> None:
+    """Dispose of the cached SQLAlchemy engine, if any."""
+    global _ENGINE
+    if _ENGINE is None:
+        return
+    _ENGINE.dispose()
+    _ENGINE = None
 
 
 def ingest_segments(
@@ -737,7 +739,11 @@ def _write_batches(
             set_={column: getattr(stmt.excluded, source) for column, source in update_fields.items()},
         )
         result = connection.execute(stmt)
-        total_written += result.rowcount or 0
+        rowcount = result.rowcount
+        if rowcount is None or rowcount < 0:
+            total_written += len(batch)
+        else:
+            total_written += rowcount
     return total_written
 
 
@@ -760,19 +766,22 @@ def parse_args() -> BoundingBox:
 
 def main() -> None:
     """CLI entrypoint for OSM ingestion."""
-    bbox = parse_args()
-    provider = OSMDataProvider()
-    segment_count = ingest_segments(bbox, provider)
-    park_count = ingest_parks(bbox, provider)
-    water_count = ingest_water_features(bbox, provider)
-    poi_count = ingest_pois(bbox, provider)
-    print(
-        "Ingested "
-        f"{segment_count} segments, "
-        f"{park_count} parks, "
-        f"{water_count} water features, "
-        f"and {poi_count} POIs"
-    )
+    try:
+        bbox = parse_args()
+        provider = OSMDataProvider()
+        segment_count = ingest_segments(bbox, provider)
+        park_count = ingest_parks(bbox, provider)
+        water_count = ingest_water_features(bbox, provider)
+        poi_count = ingest_pois(bbox, provider)
+        print(
+            "Ingested "
+            f"{segment_count} segments, "
+            f"{park_count} parks, "
+            f"{water_count} water features, "
+            f"and {poi_count} POIs"
+        )
+    finally:
+        dispose_engine()
 
 
 if __name__ == "__main__":
