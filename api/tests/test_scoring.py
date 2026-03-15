@@ -134,6 +134,31 @@ def test_park_adjacency_distance_bands() -> None:
     assert none.factors.get("park_adjacency") is None
 
 
+def test_intersection_density_modifier_by_distance() -> None:
+    weights = load_scoring_config()
+    base = score_segment({}, [], weights).score
+
+    very_short = score_segment({}, [], weights, distance_m=45)
+    assert very_short.score == base + 8.0
+    assert very_short.factors.get("intersection_density") == 8.0
+
+    short = score_segment({}, [], weights, distance_m=90)
+    assert short.score == base + 4.0
+    assert short.factors.get("intersection_density") == 4.0
+
+    typical = score_segment({}, [], weights, distance_m=180)
+    assert typical.score == base
+    assert typical.factors.get("intersection_density") is None
+
+    long_block = score_segment({}, [], weights, distance_m=300)
+    assert long_block.score == base - 6.0
+    assert long_block.factors.get("intersection_density") == -6.0
+
+    very_long = score_segment({}, [], weights, distance_m=500)
+    assert very_long.score == base - 12.0
+    assert very_long.factors.get("intersection_density") == -12.0
+
+
 def test_industrial_landuse_factor() -> None:
     weights = load_scoring_config()
     result = score_segment({"landuse": "industrial"}, [], weights)

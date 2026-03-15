@@ -55,6 +55,10 @@ def _score_batches(
     has_pois = _pois_table_exists(connection)
     has_water = _water_table_exists(connection)
     has_parks = _parks_table_exists(connection)
+    has_distance_m = _segments_has_distance_m(connection)
+    distance_expression = (
+        "distance_m" if has_distance_m else "ST_Length(geometry::geography) AS distance_m"
+    )
     processed = 0
 
     while True:
@@ -65,8 +69,8 @@ def _score_batches(
 
         rows = connection.execute(
             text(
-                """
-                SELECT id, osm_tags, ST_AsEWKB(geometry) AS geometry
+                f"""
+                SELECT id, osm_tags, {distance_expression}, ST_AsEWKB(geometry) AS geometry
                 FROM segments
                 WHERE ai_score IS NULL
                 ORDER BY id
@@ -106,6 +110,7 @@ def _score_batches(
                 weights,
                 water_distance_m=water_distance_m,
                 park_distance_m=park_distance_m,
+                distance_m=row["distance_m"],
             )
             updates.append(
                 {
@@ -166,6 +171,21 @@ def _parks_table_exists(connection: Connection) -> bool:
         .scalar_one()
         is not None
     )
+
+
+def _segments_has_distance_m(connection: Connection) -> bool:
+    return connection.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'segments'
+                  AND column_name = 'distance_m'
+            )
+            """
+        )
+    ).scalar_one()
 
 
 def _fetch_nearby_pois(connection: Connection, geometry_wkb: bytes, radius_m: int) -> list[dict]:
