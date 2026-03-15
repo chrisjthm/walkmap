@@ -17,13 +17,11 @@ Primary stack:
 - Frontend: React 18, Vite, TypeScript, MapLibre, React Query, Tailwind
 - Local orchestration: Docker Compose
 
----
-
 ## Primary workflow
 
 When asked to implement a task from the task list and spec:
 
-1. Read the relevant task details from @aesthetic-walk-planner-tasks.md and supporting spec before editing code.
+1. Read the relevant task details and supporting spec before editing code.
 2. Summarize the task in your own words.
 3. Extract acceptance criteria and identify impacted files.
 4. Call out ambiguities, assumptions, and regression risks before choosing an approach.
@@ -33,8 +31,6 @@ When asked to implement a task from the task list and spec:
 8. Provide a concise manual UAT checklist.
 9. Run relevant local validation commands before concluding.
 10. Summarize what changed, what was validated, and any remaining risks.
-
----
 
 ## Scope control
 
@@ -51,8 +47,6 @@ If a broader change seems necessary for correctness:
 - keep it as small as possible
 - clearly separate required changes from optional improvements
 
----
-
 ## Planning expectations
 
 Before coding, provide:
@@ -65,8 +59,6 @@ Before coding, provide:
 
 Prefer concrete observations over speculation.
 If something is unclear, say so explicitly instead of inventing requirements.
-
----
 
 ## Implementation expectations
 
@@ -93,8 +85,6 @@ Frontend-specific expectations:
 - preserve current UX unless the task explicitly calls for change
 - keep MapLibre-related changes tightly scoped and verify assumptions about map state, layers, and coordinate handling
 
----
-
 ## Testing expectations
 
 For each task:
@@ -119,8 +109,6 @@ When relevant, consider:
 - frontend loading / error / empty states
 - type safety
 
----
-
 ## Manual UAT expectations
 
 Always provide a concise manual UAT checklist with:
@@ -131,8 +119,6 @@ Always provide a concise manual UAT checklist with:
 - Any setup, test data, or cleanup required
 
 Keep UAT practical and fast to run.
-
----
 
 ## Validation expectations
 
@@ -145,25 +131,25 @@ Do not claim validation was performed unless the command was actually run.
 Backend checks require PostgreSQL/PostGIS running and `DATABASE_URL` set.
 
 Use:
-- `cd ./api && pip install -r requirements-dev.txt`
-- `cd ./api && pytest`
+- `cd api && pip install -r requirements-dev.txt`
+- `cd api && pytest`
 
 ### Frontend validation
 
 Use:
-- `cd ./frontend && npm install`
-- `cd ./frontend && npx playwright install --with-deps`
-- `cd ./frontend && npm run test`
-- `cd ./frontend && npm run test:e2e`
-- `cd ./frontend && npm run typecheck`
+- `cd frontend && npm install`
+- `cd frontend && npx playwright install --with-deps`
+- `cd frontend && npm run test`
+- `cd frontend && npm run test:e2e`
+- `cd frontend && npm run typecheck`
 
 ### Linting
 
 Use:
-- `cd ./api && pip install -r requirements-dev.txt`
+- `cd api && pip install -r requirements-dev.txt`
 - `ruff check api`
-- `cd ./frontend && npm install`
-- `cd ./frontend && npm run lint`
+- `cd frontend && npm install`
+- `cd frontend && npm run lint`
 
 ### Validation rules
 
@@ -173,7 +159,41 @@ Use:
 - If a command cannot be run locally, say so explicitly, explain why, and identify the closest validation that was run.
 - If Playwright e2e is not relevant to the changed code, say that explicitly rather than skipping silently.
 
----
+## Service restart policy
+
+Some changes require local services to be restarted for the changes to take effect.
+
+When a task is complete, evaluate whether the change likely requires restarting services. Examples include:
+- backend dependency changes
+- database schema changes or migrations
+- Docker configuration changes
+- environment variable changes
+- infrastructure or service wiring changes
+- frontend build configuration changes
+
+Strongly consider prompting for restart when changes touch:
+- alembic migrations
+- docker-compose.yml
+- Dockerfile
+- requirements*.txt
+- package.json
+- .env files
+
+If a restart may be required:
+
+1. Ask the user:
+   "This change may require restarting local services. Should I restart them now?"
+
+2. Only proceed if the user explicitly approves.
+
+3. If approved, run from the repository root:
+- `./scripts/teardown.sh`
+- `./scripts/startup.sh`
+
+4. Report whether the restart commands completed successfully.
+
+Do not restart services automatically without confirmation.
+Do not restart services for purely internal code edits that do not require it.
 
 ## CI failure handling
 
@@ -192,12 +212,9 @@ If given CI failure output:
 
 Do not guess if the failure output is insufficient; state what is known vs assumed.
 
----
-
 ## Output expectations
 
 For implementation tasks, structure final responses with:
-
 - Understanding
 - Acceptance criteria
 - Impacted files
@@ -213,41 +230,6 @@ For implementation tasks, structure final responses with:
 
 Keep the response concise but complete.
 
----
-
-## Service restart policy
-
-Some changes require local services to be restarted for the changes to take effect.
-
-When a task is complete, evaluate whether the change likely requires restarting services. Examples include:
-
-- backend dependency changes
-- database schema changes or migrations
-- Docker configuration changes
-- environment variable changes
-- infrastructure or service wiring changes
-- frontend build configuration changes
-
-If a restart may be required:
-
-1. Ask the user:
-
-   "This change may require restarting local services. Should I restart them now?"
-
-2. Only proceed if the user explicitly approves.
-
-3. If approved, run the restart sequence from the repository root:
-
-```
-./scripts/teardown.sh
-./scripts/startup.sh
-```
-
-4. Report whether the restart commands completed successfully.
-
-Do **not** restart services automatically without confirmation.
-Do **not** restart services for purely internal code edits that do not require it.
-
 ## PR expectations
 
 When asked for PR content:
@@ -258,8 +240,6 @@ When asked for PR content:
 - avoid hype
 - avoid overstating confidence
 
----
-
 ## Review mode expectations
 
 When asked to review a branch or diff:
@@ -268,8 +248,6 @@ When asked to review a branch or diff:
 - distinguish blockers from non-blockers
 - be skeptical and concrete
 - prefer actionable feedback
-
----
 
 ## Safety / correctness defaults
 
