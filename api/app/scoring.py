@@ -36,6 +36,7 @@ def score_segment(
     nearby_pois: list[dict],
     factor_weights: dict,
     water_distance_m: float | None = None,
+    park_distance_m: float | None = None,
 ) -> ScoringResult:
     """Score a segment based on OSM tags and nearby POIs."""
     weights = factor_weights.get("weights", factor_weights)
@@ -93,10 +94,11 @@ def score_segment(
         factors["business_density"] = business_bonus
         score += business_bonus
 
-    if _is_park_adjacent(osm_tags, nearby_pois):
-        contribution = weights.get("park_adjacency", 0.0)
-        factors["park_adjacency"] = contribution
-        score += contribution
+    park_distance = _park_distance_m(osm_tags, nearby_pois, park_distance_m)
+    park_bonus = _park_bonus(park_distance)
+    if park_bonus:
+        factors["park_adjacency"] = park_bonus
+        score += park_bonus
 
     if _is_industrial(osm_tags, nearby_pois):
         contribution = weights.get("industrial_landuse", 0.0)
@@ -267,10 +269,44 @@ def _poi_density_bonus(business_count: int) -> float:
     return 22.0
 
 
-def _is_park_adjacent(osm_tags: dict, nearby_pois: list[dict]) -> bool:
-    if osm_tags.get("leisure") == "park":
-        return True
-    return any(poi.get("leisure") == "park" for poi in nearby_pois)
+def _is_park_poi(tags: dict) -> bool:
+    return tags.get("leisure") in {"park", "playground"} or tags.get("landuse") == "grass"
+
+
+def _park_distance_m(
+    osm_tags: dict, nearby_pois: list[dict], park_distance_m: float | None
+) -> float | None:
+    if _is_park_poi(osm_tags):
+        return 0.0
+    if park_distance_m is not None:
+        return float(park_distance_m)
+    distances: list[float] = []
+    for poi in nearby_pois:
+        if not _is_park_poi(poi):
+            continue
+        distance = poi.get("distance_m")
+        if distance is None:
+            distances.append(0.0)
+            continue
+        try:
+            distances.append(float(distance))
+        except (TypeError, ValueError):
+            continue
+    if not distances:
+        return None
+    return min(distances)
+
+
+def _park_bonus(distance_m: float | None) -> float:
+    if distance_m is None:
+        return 0.0
+    if distance_m <= 20:
+        return 18.0
+    if distance_m <= 75:
+        return 10.0
+    if distance_m <= 150:
+        return 4.0
+    return 0.0
 
 
 def _is_industrial(osm_tags: dict, nearby_pois: list[dict]) -> bool:

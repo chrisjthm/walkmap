@@ -113,10 +113,25 @@ def test_tree_cover_factor() -> None:
     assert result.factors.get("tree_cover") == weights["weights"]["tree_cover"]
 
 
-def test_park_adjacency_factor() -> None:
+def test_park_adjacency_distance_bands() -> None:
     weights = load_scoring_config()
-    result = score_segment({}, [{"leisure": "park"}], weights)
-    assert result.factors.get("park_adjacency") == weights["weights"]["park_adjacency"]
+    base = score_segment({}, [], weights).score
+
+    close = score_segment({}, [], weights, park_distance_m=10)
+    assert close.score == base + 18.0
+    assert close.factors.get("park_adjacency") == 18.0
+
+    mid = score_segment({}, [], weights, park_distance_m=50)
+    assert mid.score == base + 10.0
+    assert mid.factors.get("park_adjacency") == 10.0
+
+    far = score_segment({}, [], weights, park_distance_m=120)
+    assert far.score == base + 4.0
+    assert far.factors.get("park_adjacency") == 4.0
+
+    none = score_segment({}, [], weights, park_distance_m=200)
+    assert none.score == base
+    assert none.factors.get("park_adjacency") is None
 
 
 def test_industrial_landuse_factor() -> None:
