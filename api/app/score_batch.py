@@ -12,6 +12,7 @@ from app.scoring import load_scoring_config, score_segment
 
 DEFAULT_RADIUS_M = 50
 DEFAULT_WATER_RADIUS_M = 300
+DEFAULT_PARK_RADIUS_M = 150
 
 
 def run_batch_scoring(
@@ -53,6 +54,7 @@ def _score_batches(
 
     has_pois = _pois_table_exists(connection)
     has_water = _water_table_exists(connection)
+    has_parks = _parks_table_exists(connection)
     processed = 0
 
     while True:
@@ -91,11 +93,19 @@ def _score_batches(
                     row["geometry"],
                     DEFAULT_WATER_RADIUS_M,
                 )
+            park_distance_m = None
+            if has_parks:
+                park_distance_m = _fetch_park_distance_m(
+                    connection,
+                    row["geometry"],
+                    DEFAULT_PARK_RADIUS_M,
+                )
             result = score_segment(
                 row["osm_tags"],
                 nearby_pois,
                 weights,
                 water_distance_m=water_distance_m,
+                park_distance_m=park_distance_m,
             )
             updates.append(
                 {
@@ -150,6 +160,14 @@ def _water_table_exists(connection: Connection) -> bool:
     )
 
 
+def _parks_table_exists(connection: Connection) -> bool:
+    return (
+        connection.execute(text("SELECT to_regclass('public.parks')"))
+        .scalar_one()
+        is not None
+    )
+
+
 def _fetch_nearby_pois(connection: Connection, geometry_wkb: bytes, radius_m: int) -> list[dict]:
     rows = connection.execute(
         text(
@@ -181,6 +199,34 @@ def _fetch_water_distance_m(
             FROM water_features w
             CROSS JOIN midpoint m
             WHERE ST_DWithin(w.geometry::geography, m.geom::geography, :radius_m)
+            ORDER BY distance_m
+            LIMIT 1
+            """
+        ),
+        {"geom": geometry_wkb, "radius_m": radius_m},
+    ).mappings().first()
+    if row is None:
+        return None
+    return float(row["distance_m"])
+
+
+def _fetch_park_distance_m(
+    connection: Connection, geometry_wkb: bytes, radius_m: int
+) -> float | None:
+    row = connection.execute(
+        text(
+            """
+            WITH midpoint AS (
+                SELECT ST_LineInterpolatePoint(ST_GeomFromEWKB(:geom), 0.5) AS geom
+            )
+            SELECT ST_Distance(p.geometry::geography, m.geom::geography) AS distance_m
+            FROM parks p
+            CROSS JOIN midpoint m
+            WHERE (
+                p.osm_tags ->> 'leisure' IN ('park', 'playground')
+                OR p.osm_tags ->> 'landuse' = 'grass'
+            )
+            AND ST_DWithin(p.geometry::geography, m.geom::geography, :radius_m)
             ORDER BY distance_m
             LIMIT 1
             """

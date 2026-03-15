@@ -30,6 +30,20 @@ from app.segments_display import (
 logging.basicConfig(level=logging.INFO)
 
 
+def _cors_origins() -> list[str]:
+    origins_env = os.environ.get("CORS_ORIGINS")
+    if origins_env:
+        return [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ]
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Handle startup/shutdown events for the API."""
@@ -44,10 +58,7 @@ app = FastAPI(title="Walkmap API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
