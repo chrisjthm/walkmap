@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import patch
 
 from sqlalchemy import text
 
@@ -164,13 +165,10 @@ def test_refresh_graph_logs_disconnected_components(db_connection, caplog) -> No
         osm_tags={"highway": "footway"},
     )
 
-    caplog.clear()
-    with caplog.at_level(logging.WARNING):
+    with patch("app.routing_graph.logger.warning") as warning:
         cache = refresh_graph(connection=db_connection)
 
     assert cache.component_count >= 2
     assert any(
-        record.name == "app.routing_graph"
-        and "disconnected components" in record.getMessage()
-        for record in caplog.records
+        "disconnected components" in call.args[0] for call in warning.call_args_list
     )
