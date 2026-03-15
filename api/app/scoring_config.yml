@@ -1,13 +1,18 @@
 # Scoring scale:
-# - Base score starts at 50 in code.
+# - Base score starts at the configured score.base value.
 # - Each factor adds or subtracts from that base based on weights below.
-# - Final score is clamped to 0–100.
+# - Final score is clamped to score.min/score.max.
 #
 # Maintenance guidance:
 # - Keep weights in a reasonable range (roughly -40 to +40) to avoid
 #   overpowering the base score.
 # - Adjust one factor at a time and rerun tests to validate expected behavior.
 # - Thresholds control how quickly a factor reaches full effect.
+
+score:
+  base: 40.0
+  min: 0.0
+  max: 100.0
 
 weights:
   road_type_positive: 15.0
@@ -18,12 +23,78 @@ weights:
   surface_negative: -4.0
   tree_cover: 6.0
   waterfront: 25.0
-  business_density: 8.0
-  park_adjacency: 6.0
   industrial_landuse: -12.0
   residential_landuse: 6.0
   speed_limit: -10.0
 
 thresholds:
-  business_density: 5
   speed_limit_mph: 45
+
+waterfront:
+  distance_tiers:
+    - max_distance_m: 40
+      multiplier: 0
+    - max_distance_m: 80
+      multiplier: 0
+    - max_distance_m: 150
+      multiplier: 0
+
+poi_density:
+  tiers:
+    - max_count: 3
+      bonus: 8.0
+    - max_count: 8
+      bonus: 16.0
+  default_bonus: 22.0
+
+park_adjacency:
+  tiers:
+    - max_distance_m: 20
+      bonus: 18.0
+    - max_distance_m: 75
+      bonus: 10.0
+    - max_distance_m: 150
+      bonus: 4.0
+
+intersection_density:
+  bands:
+    - max_distance_m: 60
+      modifier: 8.0
+    - max_distance_m: 120
+      modifier: 4.0
+    - max_distance_m: 250
+      modifier: 0.0
+    - max_distance_m: 400
+      modifier: -6.0
+  above_max_modifier: -12.0
+
+residential_refinement:
+  living_street_bonus: 10.0
+  oneway_penalty: -8.0
+  maxspeed_penalty: -10.0
+  lanes_penalty: -8.0
+  secondary_no_sidewalk_penalty: -12.0
+  penalty_cap: -20.0
+  bonus_cap: 10.0
+  lanes_minimum: 2
+  maxspeed_residential_mph: 25
+  maxspeed_residential_kph: 40
+
+confidence:
+  base: 0.2
+  tag_weight: 0.05
+  poi_weight: 0.02
+  highway_bonus: 0.1
+  tag_cap: 8
+  poi_cap: 10
+  low_tag_threshold: 3
+  low_tag_cap: 0.35
+  min: 0.0
+  max: 1.0
+
+composite:
+  blend_window: 5
+  user_only_min_ratings: 5
+  prior_score: 50.0
+  prior_weight: 2
+  score_scale: 100.0
