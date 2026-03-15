@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from sqlalchemy import text
-
-import logging
 
 from app.routing_graph import refresh_graph
 
@@ -170,4 +169,4 @@ def test_refresh_graph_logs_disconnected_components(db_connection, caplog) -> No
         cache = refresh_graph(connection=db_connection)
 
     assert cache.component_count >= 2
-    assert any("disconnected components" in record.message for record in caplog.records)
+    assert any("disconnected components" in record.getMessage() for record in caplog.records)
