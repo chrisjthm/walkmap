@@ -41,6 +41,7 @@ class RouteCandidate:
     verified_count: int
     unverified_count: int
     near_restaurant_count: int
+    avg_restaurant_distance_m: float | None
     residential_count: int
     snapped_start: Coordinate
     snapped_end: Coordinate
@@ -56,9 +57,21 @@ def suggest_point_to_point_routes(
     graph = get_graph()
     if graph.number_of_nodes() == 0:
         return []
+    if math.isclose(start.lat, end.lat) and math.isclose(start.lng, end.lng):
+        return []
 
-    start_node = snap_coordinate_to_node(graph, start)
-    end_node = snap_coordinate_to_node(graph, end)
+    reachability_graph = _build_search_graph(
+        graph,
+        priority="highest-rated",
+        penalized_segment_ids=set(),
+        seed=0,
+    )
+    start_node, end_node = _select_reachable_node_pair(
+        graph,
+        reachability_graph,
+        start,
+        end,
+    )
     if start_node == end_node:
         return []
 
@@ -100,24 +113,10 @@ def suggest_point_to_point_routes(
 
 
 def snap_coordinate_to_node(graph: nx.MultiDiGraph, coordinate: Coordinate) -> str:
-    nearest_node_id: str | None = None
-    nearest_distance = math.inf
-
-    for node_id, data in graph.nodes(data=True):
-        lat = data.get("lat")
-        lng = data.get("lng")
-        if lat is None or lng is None:
-            continue
-
-        distance = _haversine_m(coordinate.lat, coordinate.lng, float(lat), float(lng))
-        if distance < nearest_distance:
-            nearest_distance = distance
-            nearest_node_id = str(node_id)
-
-    if nearest_node_id is None:
+    nearest_nodes = _nearest_nodes(graph, coordinate, limit=1)
+    if not nearest_nodes:
         raise nx.NodeNotFound("routing graph has no nodes with coordinates")
-
-    return nearest_node_id
+    return nearest_nodes[0][0]
 
 
 def _build_search_graph(
@@ -167,6 +166,8 @@ def _candidate_from_path(
     verified_count = 0
     unverified_count = 0
     near_restaurant_count = 0
+    restaurant_distance_total_m = 0.0
+    restaurant_distance_count = 0
     residential_count = 0
 
     for u, v in zip(node_path, node_path[1:]):
@@ -187,6 +188,10 @@ def _candidate_from_path(
             unverified_count += 1
         if edge_data.get("near_restaurant"):
             near_restaurant_count += 1
+        restaurant_distance_m = edge_data.get("restaurant_distance_m")
+        if restaurant_distance_m is not None:
+            restaurant_distance_total_m += float(restaurant_distance_m)
+            restaurant_distance_count += 1
         if edge_data.get("is_residential"):
             residential_count += 1
 
@@ -199,6 +204,7 @@ def _candidate_from_path(
             verified_count=0,
             unverified_count=0,
             near_restaurant_count=0,
+            avg_restaurant_distance_m=None,
             residential_count=0,
             snapped_start=_coordinate_from_node(graph, node_path[0]),
             snapped_end=_coordinate_from_node(graph, node_path[-1]),
@@ -212,6 +218,11 @@ def _candidate_from_path(
         verified_count=verified_count,
         unverified_count=unverified_count,
         near_restaurant_count=near_restaurant_count,
+        avg_restaurant_distance_m=(
+            restaurant_distance_total_m / restaurant_distance_count
+            if restaurant_distance_count
+            else None
+        ),
         residential_count=residential_count,
         snapped_start=_coordinate_from_node(graph, node_path[0]),
         snapped_end=_coordinate_from_node(graph, node_path[-1]),
@@ -229,9 +240,16 @@ def _effective_weight(edge_data: dict[str, Any], *, priority: str) -> float:
     if priority == "highest-rated":
         return base_weight
     if priority == "dining":
-        return base_weight * (0.55 if edge_data.get("near_restaurant") else 1.1)
+        restaurant_distance_m = edge_data.get("restaurant_distance_m")
+        if restaurant_distance_m is None:
+            return base_weight * 1.1
+        if restaurant_distance_m <= 50.0:
+            return base_weight * 0.55
+        if restaurant_distance_m <= 150.0:
+            return base_weight * 0.8
+        return base_weight * 1.1
     if priority == "residential":
-        return base_weight * (0.55 if edge_data.get("is_residential") else 1.15)
+        return base_weight * (0.15 if edge_data.get("is_residential") else 1.5)
     if priority == "explore":
         if not edge_data.get("verified"):
             confidence = float(edge_data.get("ai_confidence") or 0.0)
@@ -239,6 +257,67 @@ def _effective_weight(edge_data: dict[str, Any], *, priority: str) -> float:
             return base_weight * max(0.45, 0.8 - confidence_bonus)
         return base_weight * 1.1
     return base_weight
+
+
+def _select_reachable_node_pair(
+    graph: nx.MultiDiGraph,
+    projected: nx.DiGraph,
+    start: Coordinate,
+    end: Coordinate,
+    *,
+    nearest_limit: int = 10,
+) -> tuple[str, str]:
+    start_candidates = _nearest_nodes(graph, start, limit=nearest_limit)
+    end_candidates = _nearest_nodes(graph, end, limit=nearest_limit)
+
+    if not start_candidates or not end_candidates:
+        raise nx.NodeNotFound("routing graph has no nodes with coordinates")
+
+    best_pair: tuple[str, str] | None = None
+    best_distance = math.inf
+
+    for start_node, start_distance in start_candidates:
+        for end_node, end_distance in end_candidates:
+            if start_node == end_node:
+                continue
+            if not nx.has_path(projected, start_node, end_node):
+                continue
+
+            total_distance = start_distance + end_distance
+            if total_distance < best_distance:
+                best_pair = (start_node, end_node)
+                best_distance = total_distance
+
+    if best_pair is not None:
+        return best_pair
+
+    for start_node, _start_distance in start_candidates:
+        for end_node, _end_distance in end_candidates:
+            if start_node != end_node:
+                return start_node, end_node
+
+    return start_candidates[0][0], end_candidates[0][0]
+
+
+def _nearest_nodes(
+    graph: nx.MultiDiGraph,
+    coordinate: Coordinate,
+    *,
+    limit: int,
+) -> list[tuple[str, float]]:
+    distances: list[tuple[str, float]] = []
+
+    for node_id, data in graph.nodes(data=True):
+        lat = data.get("lat")
+        lng = data.get("lng")
+        if lat is None or lng is None:
+            continue
+
+        distance = _haversine_m(coordinate.lat, coordinate.lng, float(lat), float(lng))
+        distances.append((str(node_id), distance))
+
+    distances.sort(key=lambda item: item[1])
+    return distances[:limit]
 
 
 def _is_pedestrian_navigable(edge_data: dict[str, Any]) -> bool:

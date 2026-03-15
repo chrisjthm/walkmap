@@ -84,6 +84,15 @@ def _build_graph(connection: Connection, start_time: float) -> GraphCache:
             )
         )
     """
+    restaurant_distance_query = "NULL" if not has_pois else """
+        (
+            SELECT MIN(ST_Distance(s.geometry::geography, p.geometry::geography))
+            FROM pois p
+            WHERE
+                p.osm_tags ? 'shop'
+                OR (p.osm_tags->>'amenity') = ANY(:amenities)
+        )
+    """
 
     query = text(
         f"""
@@ -98,7 +107,8 @@ def _build_graph(connection: Connection, start_time: float) -> GraphCache:
             ST_Y(ST_StartPoint(s.geometry)) AS start_lat,
             ST_X(ST_EndPoint(s.geometry)) AS end_lon,
             ST_Y(ST_EndPoint(s.geometry)) AS end_lat,
-            {near_restaurant_query} AS near_restaurant
+            {near_restaurant_query} AS near_restaurant,
+            {restaurant_distance_query} AS restaurant_distance_m
         FROM segments s
         """
     )
@@ -151,6 +161,11 @@ def _build_graph(connection: Connection, start_time: float) -> GraphCache:
             ai_confidence=row["ai_confidence"],
             osm_tags=osm_tags,
             near_restaurant=bool(row["near_restaurant"]),
+            restaurant_distance_m=(
+                float(row["restaurant_distance_m"])
+                if row["restaurant_distance_m"] is not None
+                else None
+            ),
             is_residential=_is_residential(osm_tags),
             weight=weight,
         )

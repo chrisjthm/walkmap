@@ -217,7 +217,9 @@ def test_priority_modes_shift_route_selection(db_connection) -> None:
     assert set(residential.segment_ids) == {"22:20:23:0", "23:23:22:0"}
     assert set(dining.segment_ids) == {"20:20:21:0", "21:21:22:0"}
     assert highest_rated.segment_ids != residential.segment_ids
-    assert dining.near_restaurant_count > residential.near_restaurant_count
+    assert dining.avg_restaurant_distance_m is not None
+    assert residential.avg_restaurant_distance_m is not None
+    assert dining.avg_restaurant_distance_m < residential.avg_restaurant_distance_m
     assert dining.avg_score - residential.avg_score > 10.0
 
 
@@ -244,8 +246,8 @@ def test_ocean_coordinate_snaps_to_nearest_land_node(db_connection) -> None:
     )
 
     assert len(routes) == 1
-    assert routes[0].snapped_start.lat == 40.0
-    assert routes[0].snapped_start.lng == -74.0
+    assert 39.999 <= routes[0].snapped_start.lat <= 40.0
+    assert -74.002 <= routes[0].snapped_start.lng <= -74.0
 
 
 def test_routing_excludes_non_pedestrian_edges(db_connection) -> None:
