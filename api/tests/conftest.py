@@ -58,7 +58,10 @@ def db_engine():
     print("Running Alembic migrations...", flush=True)
     command.upgrade(_alembic_config(database_url), "head")
     print("Migrations complete.", flush=True)
-    return engine
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture()

@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import Connection, Engine, text
 
 from app.ingest import get_engine
+from app.routing_graph import refresh_graph
 from app.scoring import load_scoring_config, score_segment
 
 DEFAULT_RADIUS_M = 50
@@ -23,6 +24,7 @@ def run_batch_scoring(
     """Score unscored segments in batches and persist results."""
     weights = load_scoring_config()
     processed = 0
+    connection_provided = connection is not None
     if connection is None:
         engine = engine or get_engine()
         with engine.begin() as connection:
@@ -30,6 +32,11 @@ def run_batch_scoring(
     else:
         processed = _score_batches(connection, weights, batch_size, limit, radius_m)
 
+    if processed:
+        if connection_provided:
+            refresh_graph(connection=connection)
+        else:
+            refresh_graph(engine=engine)
     return processed
 
 
