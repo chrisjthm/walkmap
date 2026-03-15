@@ -165,8 +165,12 @@ def test_refresh_graph_logs_disconnected_components(db_connection, caplog) -> No
     )
 
     caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="app.routing_graph"):
+    with caplog.at_level(logging.WARNING):
         cache = refresh_graph(connection=db_connection)
 
     assert cache.component_count >= 2
-    assert any("disconnected components" in record.getMessage() for record in caplog.records)
+    assert any(
+        record.name == "app.routing_graph"
+        and "disconnected components" in record.getMessage()
+        for record in caplog.records
+    )
