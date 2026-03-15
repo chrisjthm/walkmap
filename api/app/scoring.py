@@ -37,6 +37,7 @@ def score_segment(
     factor_weights: dict,
     water_distance_m: float | None = None,
     park_distance_m: float | None = None,
+    distance_m: float | None = None,
 ) -> ScoringResult:
     """Score a segment based on OSM tags and nearby POIs."""
     weights = factor_weights.get("weights", factor_weights)
@@ -99,6 +100,11 @@ def score_segment(
     if park_bonus:
         factors["park_adjacency"] = park_bonus
         score += park_bonus
+
+    intersection_modifier = _intersection_density_modifier(distance_m)
+    if intersection_modifier:
+        factors["intersection_density"] = intersection_modifier
+        score += intersection_modifier
 
     if _is_industrial(osm_tags, nearby_pois):
         contribution = weights.get("industrial_landuse", 0.0)
@@ -307,6 +313,24 @@ def _park_bonus(distance_m: float | None) -> float:
     if distance_m <= 150:
         return 4.0
     return 0.0
+
+
+def _intersection_density_modifier(distance_m: float | None) -> float:
+    if distance_m is None:
+        return 0.0
+    try:
+        value = float(distance_m)
+    except (TypeError, ValueError):
+        return 0.0
+    if value < 60:
+        return 8.0
+    if value <= 120:
+        return 4.0
+    if value <= 250:
+        return 0.0
+    if value > 400:
+        return -12.0
+    return -6.0
 
 
 def _is_industrial(osm_tags: dict, nearby_pois: list[dict]) -> bool:
