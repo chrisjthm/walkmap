@@ -406,7 +406,7 @@ These modifiers stack but are capped: total penalty cannot exceed -20, total bon
 
 ---
 
-### B2.4 — Scoring: Park Adjacency Distance Bands
+### B2.4 — Scoring: Park Adjacency Distance Bands [COMPLETED]
 
 **Description:**
 Replace the binary park proximity check with a distance gradient using `ST_Distance` from the segment midpoint to the nearest `leisure=park`, `leisure=playground`, or `landuse=grass` polygon:
@@ -431,7 +431,7 @@ Replace the binary park proximity check with a distance gradient using `ST_Dista
 
 ---
 
-### B2.5 — Scoring: Intersection Density
+### B2.5 — Scoring: Intersection Density [COMPLETED]
 
 **Description:**
 Use the pedestrian graph structure (already built in D1) to compute a pedestrian interest score based on block length. Shorter blocks with more intersections create more interesting, navigable walks. Derive this from the segment's `distance_m`:
@@ -490,7 +490,7 @@ Known ground truth anchors for Jersey City:
 
 ---
 
-### B2.7 — Scoring: Externalize All Numeric Factors
+### B2.7 — Scoring: Externalize All Numeric Factors [COMPLETED]
 
 **Description:**  
 Move all numeric scoring values (base score, additions/subtractions, multipliers, caps, thresholds) out of code and into `scoring_config.yml`. The scoring logic should reference configuration exclusively for numeric values.
