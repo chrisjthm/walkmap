@@ -24,42 +24,55 @@ def test_waterfront_footway_scores_high() -> None:
 
 def test_waterfront_distance_tiers_apply_bonus() -> None:
     weights = load_scoring_config()
+    tiers = weights["waterfront"]["distance_tiers"]
     base = score_segment({"highway": "footway"}, [], weights).score
 
     close = score_segment(
         {"highway": "footway"},
         [],
         weights,
-        water_distance_m=30,
+        water_distance_m=tiers[0]["max_distance_m"],
     )
-    assert close.factors.get("waterfront") == weights["weights"]["waterfront"]
-    assert close.score == base + weights["weights"]["waterfront"]
+    assert close.factors.get("waterfront") == (
+        weights["weights"]["waterfront"] * tiers[0]["multiplier"]
+    )
+    assert close.score == (
+        base + weights["weights"]["waterfront"] * tiers[0]["multiplier"]
+    )
 
     mid = score_segment(
         {"highway": "footway"},
         [],
         weights,
-        water_distance_m=60,
+        water_distance_m=tiers[1]["max_distance_m"],
     )
-    expected_mid = base + weights["weights"]["waterfront"] * 0.4
+    expected_mid = (
+        base + weights["weights"]["waterfront"] * tiers[1]["multiplier"]
+    )
     assert abs(mid.score - expected_mid) < 0.01
-    assert mid.factors.get("waterfront") == weights["weights"]["waterfront"] * 0.4
+    assert mid.factors.get("waterfront") == (
+        weights["weights"]["waterfront"] * tiers[1]["multiplier"]
+    )
 
     far = score_segment(
         {"highway": "footway"},
         [],
         weights,
-        water_distance_m=120,
+        water_distance_m=tiers[2]["max_distance_m"],
     )
-    expected_far = base + weights["weights"]["waterfront"] * 0.16
+    expected_far = (
+        base + weights["weights"]["waterfront"] * tiers[2]["multiplier"]
+    )
     assert abs(far.score - expected_far) < 0.01
-    assert far.factors.get("waterfront") == weights["weights"]["waterfront"] * 0.16
+    assert far.factors.get("waterfront") == (
+        weights["weights"]["waterfront"] * tiers[2]["multiplier"]
+    )
 
     none = score_segment(
         {"highway": "footway"},
         [],
         weights,
-        water_distance_m=200,
+        water_distance_m=tiers[-1]["max_distance_m"] + 50,
     )
     assert none.factors.get("waterfront") is None
     assert none.score == base
@@ -73,26 +86,42 @@ def test_residential_sidewalk_and_business_scores_above_threshold() -> None:
         pois,
         weights,
     )
-    assert result.score > 55
+    score_base = weights["score"]["base"]
+    expected_bonus = (
+        weights["weights"]["road_type_positive"] + weights["weights"]["sidewalk_positive"]
+    )
+    expected_bonus += weights["poi_density"]["tiers"][1]["bonus"]
+    assert result.score > score_base + expected_bonus - 0.01
 
 
 def test_poi_density_bonus_tiers() -> None:
     weights = load_scoring_config()
+    tiers = weights["poi_density"]["tiers"]
     base = score_segment({}, [], weights).score
 
-    low = score_segment({}, [{"amenity": "restaurant"} for _ in range(2)], weights).score
-    mid = score_segment({}, [{"amenity": "restaurant"} for _ in range(6)], weights).score
-    high = score_segment({}, [{"amenity": "restaurant"} for _ in range(15)], weights).score
+    low_count = tiers[0]["max_count"]
+    mid_count = tiers[1]["max_count"]
+    high_count = mid_count + 5
 
-    assert low - base == 8.0
-    assert mid - base == 16.0
-    assert high - base == 22.0
+    low = score_segment(
+        {}, [{"amenity": "restaurant"} for _ in range(low_count)], weights
+    ).score
+    mid = score_segment(
+        {}, [{"amenity": "restaurant"} for _ in range(mid_count)], weights
+    ).score
+    high = score_segment(
+        {}, [{"amenity": "restaurant"} for _ in range(high_count)], weights
+    ).score
+
+    assert low - base == tiers[0]["bonus"]
+    assert mid - base == tiers[1]["bonus"]
+    assert high - base == weights["poi_density"]["default_bonus"]
 
 
 def test_low_tag_count_confidence_is_low() -> None:
     weights = load_scoring_config()
     result = score_segment({"highway": "residential"}, [], weights)
-    assert result.confidence < 0.4
+    assert result.confidence <= weights["confidence"]["low_tag_cap"]
 
 
 def test_surface_positive_factor() -> None:
@@ -115,48 +144,57 @@ def test_tree_cover_factor() -> None:
 
 def test_park_adjacency_distance_bands() -> None:
     weights = load_scoring_config()
+    tiers = weights["park_adjacency"]["tiers"]
     base = score_segment({}, [], weights).score
 
-    close = score_segment({}, [], weights, park_distance_m=10)
-    assert close.score == base + 18.0
-    assert close.factors.get("park_adjacency") == 18.0
+    close = score_segment({}, [], weights, park_distance_m=tiers[0]["max_distance_m"])
+    assert close.score == base + tiers[0]["bonus"]
+    assert close.factors.get("park_adjacency") == tiers[0]["bonus"]
 
-    mid = score_segment({}, [], weights, park_distance_m=50)
-    assert mid.score == base + 10.0
-    assert mid.factors.get("park_adjacency") == 10.0
+    mid = score_segment({}, [], weights, park_distance_m=tiers[1]["max_distance_m"])
+    assert mid.score == base + tiers[1]["bonus"]
+    assert mid.factors.get("park_adjacency") == tiers[1]["bonus"]
 
-    far = score_segment({}, [], weights, park_distance_m=120)
-    assert far.score == base + 4.0
-    assert far.factors.get("park_adjacency") == 4.0
+    far = score_segment({}, [], weights, park_distance_m=tiers[2]["max_distance_m"])
+    assert far.score == base + tiers[2]["bonus"]
+    assert far.factors.get("park_adjacency") == tiers[2]["bonus"]
 
-    none = score_segment({}, [], weights, park_distance_m=200)
+    none = score_segment(
+        {}, [], weights, park_distance_m=tiers[-1]["max_distance_m"] + 50
+    )
     assert none.score == base
     assert none.factors.get("park_adjacency") is None
 
 
 def test_intersection_density_modifier_by_distance() -> None:
     weights = load_scoring_config()
+    bands = weights["intersection_density"]["bands"]
     base = score_segment({}, [], weights).score
 
-    very_short = score_segment({}, [], weights, distance_m=45)
-    assert very_short.score == base + 8.0
-    assert very_short.factors.get("intersection_density") == 8.0
+    very_short = score_segment({}, [], weights, distance_m=bands[0]["max_distance_m"])
+    assert very_short.score == base + bands[0]["modifier"]
+    assert very_short.factors.get("intersection_density") == bands[0]["modifier"]
 
-    short = score_segment({}, [], weights, distance_m=90)
-    assert short.score == base + 4.0
-    assert short.factors.get("intersection_density") == 4.0
+    short = score_segment({}, [], weights, distance_m=bands[1]["max_distance_m"])
+    assert short.score == base + bands[1]["modifier"]
+    assert short.factors.get("intersection_density") == bands[1]["modifier"]
 
-    typical = score_segment({}, [], weights, distance_m=180)
+    typical = score_segment({}, [], weights, distance_m=bands[2]["max_distance_m"])
     assert typical.score == base
     assert typical.factors.get("intersection_density") is None
 
-    long_block = score_segment({}, [], weights, distance_m=300)
-    assert long_block.score == base - 6.0
-    assert long_block.factors.get("intersection_density") == -6.0
+    long_block = score_segment({}, [], weights, distance_m=bands[3]["max_distance_m"])
+    assert long_block.score == base + bands[3]["modifier"]
+    assert long_block.factors.get("intersection_density") == bands[3]["modifier"]
 
-    very_long = score_segment({}, [], weights, distance_m=500)
-    assert very_long.score == base - 12.0
-    assert very_long.factors.get("intersection_density") == -12.0
+    very_long = score_segment(
+        {}, [], weights, distance_m=bands[-1]["max_distance_m"] + 100
+    )
+    assert very_long.score == base + weights["intersection_density"]["above_max_modifier"]
+    assert (
+        very_long.factors.get("intersection_density")
+        == weights["intersection_density"]["above_max_modifier"]
+    )
 
 
 def test_industrial_landuse_factor() -> None:
@@ -229,20 +267,24 @@ def test_residential_oneway_penalty() -> None:
     weights = load_scoring_config()
     baseline = score_segment({"highway": "residential"}, [], weights).score
     penalized = score_segment({"highway": "residential", "oneway": "yes"}, [], weights).score
-    assert round(baseline - penalized, 1) == 8.0
+    assert round(baseline - penalized, 1) == abs(
+        weights["residential_refinement"]["oneway_penalty"]
+    )
 
 
 def test_living_street_bonus() -> None:
     weights = load_scoring_config()
     residential = score_segment({"highway": "residential"}, [], weights).score
     living = score_segment({"highway": "living_street"}, [], weights).score
-    assert living - residential >= 10.0
+    assert (
+        living - residential >= weights["residential_refinement"]["living_street_bonus"]
+    )
 
 
 def test_secondary_no_sidewalk_penalty_keeps_score_low() -> None:
     weights = load_scoring_config()
     result = score_segment({"highway": "secondary", "lanes": "2"}, [], weights)
-    assert result.score < 40.0
+    assert result.score < weights["score"]["base"]
 
 
 def test_residential_penalty_stack_capped() -> None:
@@ -253,4 +295,7 @@ def test_residential_penalty_stack_capped() -> None:
         [],
         weights,
     ).score
-    assert round(baseline - penalized, 1) == 18.0
+    expected = abs(weights["residential_refinement"]["oneway_penalty"]) + abs(
+        weights["residential_refinement"]["maxspeed_penalty"]
+    )
+    assert round(baseline - penalized, 1) == expected
