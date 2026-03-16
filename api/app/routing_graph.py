@@ -69,21 +69,19 @@ def refresh_graph(
 
 def _build_graph(connection: Connection, start_time: float) -> GraphCache:
     has_pois = _table_exists(connection, "pois")
-    near_restaurant_query = "FALSE" if not has_pois else """
-        EXISTS (
-            SELECT 1
+    nearest_poi_join = "" if not has_pois else """
+        LEFT JOIN LATERAL (
+            SELECT ST_Distance(s.geometry::geography, p.geometry::geography) AS distance_m
             FROM pois p
-            WHERE ST_DWithin(
-                s.geometry::geography,
-                p.geometry::geography,
-                50
-            )
-            AND (
+            WHERE
                 p.osm_tags ? 'shop'
                 OR (p.osm_tags->>'amenity') = ANY(:amenities)
-            )
-        )
+            ORDER BY s.geometry <-> p.geometry
+            LIMIT 1
+        ) nearest_poi ON TRUE
     """
+    near_restaurant_query = "FALSE" if not has_pois else "COALESCE(nearest_poi.distance_m <= 50, FALSE)"
+    restaurant_distance_query = "NULL" if not has_pois else "nearest_poi.distance_m"
 
     query = text(
         f"""
@@ -98,8 +96,10 @@ def _build_graph(connection: Connection, start_time: float) -> GraphCache:
             ST_Y(ST_StartPoint(s.geometry)) AS start_lat,
             ST_X(ST_EndPoint(s.geometry)) AS end_lon,
             ST_Y(ST_EndPoint(s.geometry)) AS end_lat,
-            {near_restaurant_query} AS near_restaurant
+            {near_restaurant_query} AS near_restaurant,
+            {restaurant_distance_query} AS restaurant_distance_m
         FROM segments s
+        {nearest_poi_join}
         """
     )
 
@@ -151,6 +151,11 @@ def _build_graph(connection: Connection, start_time: float) -> GraphCache:
             ai_confidence=row["ai_confidence"],
             osm_tags=osm_tags,
             near_restaurant=bool(row["near_restaurant"]),
+            restaurant_distance_m=(
+                float(row["restaurant_distance_m"])
+                if row["restaurant_distance_m"] is not None
+                else None
+            ),
             is_residential=_is_residential(osm_tags),
             weight=weight,
         )
@@ -216,11 +221,8 @@ def _tag_in(value: Any, options: set[str]) -> bool:
 
 
 def _is_residential(osm_tags: dict[str, Any]) -> bool:
-    landuse = osm_tags.get("landuse")
     highway = osm_tags.get("highway")
-    return _tag_in(landuse, {"residential"}) and _tag_in(
-        highway, {"residential", "living_street"}
-    )
+    return _tag_in(highway, {"residential", "living_street"})
 
 
 def _table_exists(connection: Connection, table_name: str) -> bool:

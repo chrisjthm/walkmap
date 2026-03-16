@@ -171,3 +171,41 @@ def test_refresh_graph_logs_disconnected_components(db_connection, caplog) -> No
     assert any(
         "disconnected components" in call.args[0] for call in warning.call_args_list
     )
+
+
+class _ScalarResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one(self):
+        return self._value
+
+
+class _MappingsResult:
+    def mappings(self):
+        return self
+
+    def all(self):
+        return []
+
+
+class _RecordingConnection:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def execute(self, statement, params=None):
+        query_text = str(statement)
+        self.queries.append(query_text)
+        if "to_regclass" in query_text:
+            return _ScalarResult("public.pois")
+        return _MappingsResult()
+
+
+def test_refresh_graph_uses_indexable_nearest_poi_query() -> None:
+    connection = _RecordingConnection()
+
+    refresh_graph(connection=connection)
+
+    graph_query = next(query for query in connection.queries if "FROM segments s" in query)
+    assert "JOIN LATERAL" in graph_query
+    assert "ORDER BY s.geometry <-> p.geometry" in graph_query
