@@ -223,6 +223,47 @@ def test_priority_modes_shift_route_selection(db_connection) -> None:
     assert dining.avg_score - residential.avg_score > 10.0
 
 
+def test_residential_priority_prefers_residential_highways_without_landuse(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "30:30:31:0",
+        "LINESTRING(-74.0300 40.0300, -74.0310 40.0300)",
+        composite_score=75.0,
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "31:31:32:0",
+        "LINESTRING(-74.0310 40.0300, -74.0320 40.0300)",
+        composite_score=74.0,
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "32:30:33:0",
+        "LINESTRING(-74.0300 40.0300, -74.0310 40.0310)",
+        composite_score=55.0,
+        osm_tags={"highway": "residential"},
+    )
+    _insert_segment(
+        db_connection,
+        "33:33:32:0",
+        "LINESTRING(-74.0310 40.0310, -74.0320 40.0300)",
+        composite_score=54.0,
+        osm_tags={"highway": "residential"},
+    )
+    refresh_graph(connection=db_connection)
+
+    residential = suggest_point_to_point_routes(
+        Coordinate(lat=40.03002, lng=-74.03002),
+        Coordinate(lat=40.03001, lng=-74.03201),
+        priority="residential",
+        candidate_count=1,
+    )[0]
+
+    assert set(residential.segment_ids) == {"32:30:33:0", "33:33:32:0"}
+
+
 def test_origin_equal_destination_returns_empty_routes(db_connection) -> None:
     _build_three_corridor_graph(db_connection)
     refresh_graph(connection=db_connection)
