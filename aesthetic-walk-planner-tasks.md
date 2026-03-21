@@ -773,7 +773,7 @@ Each returned route must include: ordered list of segment IDs, GeoJSON LineStrin
 
 *Depends on: B1 (graph structure), B2/B3 (segment scores). Can be prototyped against mock scored data.*
 
-### D1 — Pedestrian Graph Construction
+### D1 — Pedestrian Graph Construction [COMPLETED]
 
 **Description:**
 Build and cache an in-memory NetworkX directed graph from the `segments` table. This graph is the foundation for all routing.
@@ -801,7 +801,7 @@ The graph is built at API startup and cached. Provide a `refresh_graph()` functi
 
 ---
 
-### D2 — Point-to-Point and Point-to-Destination Routing
+### D2 — Point-to-Point and Point-to-Destination Routing [COMPLETED]
 
 **Description:**
 Score-optimized routing between two points using NetworkX's A* algorithm on the pedestrian graph.
