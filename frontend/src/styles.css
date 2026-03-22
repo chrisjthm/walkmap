@@ -27,6 +27,7 @@
     font-family: "Chivo", sans-serif;
     color: #0f1e1b;
     background: radial-gradient(circle at top left, #f7f1e6 0%, #eef2ed 45%, #e5ebe4 100%);
+    overflow: hidden;
   }
 
   h1,
@@ -43,7 +44,8 @@
   .app-shell {
     display: grid;
     grid-template-columns: var(--panel-width) 1fr;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
     transition: grid-template-columns 0.4s ease;
   }
 
@@ -54,6 +56,7 @@
   .panel-shell {
     position: relative;
     z-index: 20;
+    height: 100vh;
     background: var(--panel-bg);
     border-right: 1px solid var(--panel-border);
     backdrop-filter: blur(14px);
@@ -67,6 +70,7 @@
     flex-direction: column;
     padding: 2.25rem 1.75rem 2rem;
     gap: 1.5rem;
+    overflow-y: auto;
   }
 
   .panel-header {
@@ -133,6 +137,11 @@
     gap: 0.9rem;
   }
 
+  .planner-stack {
+    display: grid;
+    gap: 1.1rem;
+  }
+
   .panel-field {
     display: flex;
     flex-direction: column;
@@ -153,6 +162,279 @@
     padding: 0.65rem 0.85rem;
     font-size: 0.95rem;
     background: rgba(255, 255, 255, 0.8);
+  }
+
+  .planner-kicker {
+    margin: 0;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.24em;
+    color: #9b6234;
+  }
+
+  .planner-input-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.6rem;
+  }
+
+  .planner-helper {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #567160;
+  }
+
+  .planner-ghost-button {
+    padding: 0.7rem 0.95rem;
+    border-radius: 16px;
+    border: 1px solid rgba(15, 30, 27, 0.18);
+    background: rgba(255, 255, 255, 0.58);
+    color: #0f1e1b;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .planner-choice-grid,
+  .planner-priority-grid {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .planner-choice-card,
+  .planner-priority-card {
+    display: grid;
+    gap: 0.25rem;
+    text-align: left;
+    padding: 0.9rem 1rem;
+    border-radius: 18px;
+    border: 1px solid rgba(15, 30, 27, 0.12);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35)),
+      rgba(231, 237, 228, 0.6);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+
+  .planner-choice-card[data-active="true"],
+  .planner-priority-card[data-active="true"] {
+    border-color: rgba(15, 30, 27, 0.6);
+    box-shadow: 0 16px 30px -24px rgba(15, 30, 27, 0.65);
+    transform: translateY(-1px);
+  }
+
+  .planner-choice-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .planner-choice-copy {
+    font-size: 0.74rem;
+    color: #4e6858;
+    line-height: 1.45;
+  }
+
+  .planner-inline-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .planner-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .planner-pill {
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 30, 27, 0.14);
+    background: rgba(255, 255, 255, 0.62);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .planner-pill[data-active="true"] {
+    background: #0f1e1b;
+    color: #f7f1e6;
+    border-color: #0f1e1b;
+  }
+
+  .planner-slider {
+    width: 100%;
+    accent-color: #9b6234;
+  }
+
+  .planner-metric-band {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.8rem;
+    font-family: "Fraunces", serif;
+    font-size: 1rem;
+    color: #0f1e1b;
+  }
+
+  .planner-two-up {
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .planner-summary-card {
+    border-radius: 20px;
+    padding: 1rem;
+    background:
+      radial-gradient(circle at top right, rgba(243, 192, 99, 0.18), transparent 45%),
+      rgba(15, 30, 27, 0.05);
+    border: 1px solid rgba(15, 30, 27, 0.08);
+  }
+
+  .planner-summary-metric {
+    margin-top: 0.5rem;
+    font-family: "Fraunces", serif;
+    font-size: 1.6rem;
+  }
+
+  .planner-summary-copy {
+    margin: 0.35rem 0 0;
+    font-size: 0.78rem;
+    color: #4e6858;
+  }
+
+  .planner-error {
+    margin-top: 1rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 16px;
+    border: 1px solid rgba(173, 70, 43, 0.25);
+    background: rgba(173, 70, 43, 0.1);
+    color: #7f351f;
+    font-size: 0.82rem;
+  }
+
+  .planner-result-count {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #567160;
+  }
+
+  .planner-results-list {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .planner-route-card {
+    display: grid;
+    gap: 0.8rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.95rem 1rem;
+    border-radius: 20px;
+    border: 1px solid rgba(15, 30, 27, 0.12);
+    background: rgba(255, 255, 255, 0.62);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+
+  .planner-route-card[data-active="true"] {
+    border-color: rgba(15, 30, 27, 0.58);
+    transform: translateY(-1px);
+    box-shadow: 0 16px 30px -24px rgba(15, 30, 27, 0.7);
+  }
+
+  .planner-route-header,
+  .planner-route-title-row,
+  .planner-route-stats,
+  .route-map-key-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem;
+  }
+
+  .planner-route-title-row {
+    justify-content: flex-start;
+  }
+
+  .planner-route-swatch {
+    width: 0.8rem;
+    height: 2.8rem;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  }
+
+  .planner-route-index {
+    margin: 0;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: #567160;
+  }
+
+  .planner-score-badge {
+    padding: 0.35rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(15, 30, 27, 0.09);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .planner-route-stats {
+    font-size: 0.75rem;
+    color: #4e6858;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .route-map-key {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .route-results-overlay {
+    position: absolute;
+    left: calc(50% + 110px);
+    bottom: 1.5rem;
+    transform: translateX(-50%);
+    z-index: 6;
+    width: min(920px, calc(100vw - var(--panel-width) - 6rem));
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem 1.05rem;
+    border-radius: 22px;
+    background: rgba(247, 241, 230, 0.94);
+    border: 1px solid rgba(15, 30, 27, 0.18);
+    box-shadow: 0 20px 40px -24px rgba(15, 30, 27, 0.6);
+    backdrop-filter: blur(14px);
+  }
+
+  .route-results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .route-results-list {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(220px, 1fr);
+    gap: 0.7rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 0.15rem;
+  }
+
+  .route-results-card {
+    background: rgba(255, 255, 255, 0.82);
+    min-height: 100%;
   }
 
   .chip-row {
@@ -196,13 +478,36 @@
   .map-shell {
     position: relative;
     overflow: hidden;
-    min-height: 100vh;
+    height: 100vh;
     background: #0f1e1b;
   }
 
   .map-canvas {
     position: absolute;
     inset: 0;
+  }
+
+  .route-overlay-svg {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .route-overlay-casing,
+  .route-overlay-line {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .route-overlay-casing {
+    stroke: rgba(247, 241, 230, 0.95);
+    stroke-width: 12;
   }
 
   .map-surface {
@@ -533,7 +838,7 @@
   .panel-shell {
     position: absolute;
     width: var(--panel-width);
-    height: 100%;
+    height: 100vh;
     left: 0;
     top: 0;
     transform: translateX(0);
@@ -542,6 +847,27 @@
 
   .app-shell[data-panel="closed"] .panel-shell {
     transform: translateX(calc(-1 * var(--panel-width)));
+  }
+
+  .planner-two-up,
+  .planner-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .route-results-overlay {
+    transform: none;
+    bottom: 8.5rem;
+    left: 1rem;
+    right: 1rem;
+    width: auto;
+  }
+
+  .route-results-list {
+    grid-auto-flow: row;
+    grid-auto-columns: unset;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: min(38vh, 320px);
   }
 }
 
