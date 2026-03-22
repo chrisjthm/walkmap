@@ -243,6 +243,12 @@ def _coordinate_from_row(lat: float | None, lng: float | None) -> dict[str, floa
     return {"lat": float(lat), "lng": float(lng)}
 
 
+def _point_wkt(coordinate: CoordinatePayload | None) -> str | None:
+    if coordinate is None:
+        return None
+    return f"POINT({coordinate.lng} {coordinate.lat})"
+
+
 def _validate_route_save_request(connection, request: RouteSaveRequest) -> None:
     if request.mode != "loop" and request.end is None:
         raise HTTPException(
@@ -483,6 +489,7 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
     engine = get_engine()
     with engine.begin() as connection:
         _validate_route_save_request(connection, request)
+        end_point_wkt = _point_wkt(request.end)
         row = connection.execute(
             text(
                 """
@@ -499,13 +506,8 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
                 )
                 VALUES (
                     :user_id,
-                    ST_SetSRID(ST_MakePoint(:start_lng, :start_lat), 4326),
-                    CAST(
-                        CASE
-                            WHEN :end_lat IS NULL OR :end_lng IS NULL THEN NULL
-                            ELSE ST_SetSRID(ST_MakePoint(:end_lng, :end_lat), 4326)
-                        END AS geometry
-                    ),
+                    ST_GeomFromText(:start_point_wkt, 4326),
+                    ST_GeomFromText(:end_point_wkt, 4326),
                     :mode,
                     :priority,
                     :segment_ids,
@@ -518,10 +520,8 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
             ),
             {
                 "user_id": user_id,
-                "start_lat": request.start.lat,
-                "start_lng": request.start.lng,
-                "end_lat": request.end.lat if request.end else None,
-                "end_lng": request.end.lng if request.end else None,
+                "start_point_wkt": _point_wkt(request.start),
+                "end_point_wkt": end_point_wkt,
                 "mode": request.mode,
                 "priority": request.priority,
                 "segment_ids": request.segment_ids,
