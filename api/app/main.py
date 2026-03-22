@@ -489,11 +489,13 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
     engine = get_engine()
     with engine.begin() as connection:
         _validate_route_save_request(connection, request)
+        route_id = uuid.uuid4()
         end_point_wkt = _point_wkt(request.end)
         row = connection.execute(
             text(
                 """
                 INSERT INTO routes (
+                    id,
                     user_id,
                     start_point,
                     end_point,
@@ -505,6 +507,7 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
                     avg_score
                 )
                 VALUES (
+                    :route_id,
                     :user_id,
                     ST_GeomFromText(:start_point_wkt, 4326),
                     ST_GeomFromText(:end_point_wkt, 4326),
@@ -519,6 +522,7 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
                 """
             ),
             {
+                "route_id": route_id,
                 "user_id": user_id,
                 "start_point_wkt": _point_wkt(request.start),
                 "end_point_wkt": end_point_wkt,
