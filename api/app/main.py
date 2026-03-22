@@ -23,7 +23,12 @@ from app.ingest import (
     ingest_segments,
     ingest_water_features,
 )
-from app.routing import Coordinate, RouteCandidate, suggest_loop_routes, suggest_point_to_point_routes
+from app.routing import (
+    Coordinate,
+    RouteCandidate,
+    suggest_loop_routes,
+    suggest_point_to_point_routes,
+)
 from app.routing_graph import get_graph, refresh_graph
 from app.score_batch import run_batch_scoring
 from app.segments_display import (
@@ -495,10 +500,12 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
                 VALUES (
                     :user_id,
                     ST_SetSRID(ST_MakePoint(:start_lng, :start_lat), 4326),
-                    CASE
-                        WHEN :end_lat IS NULL OR :end_lng IS NULL THEN NULL
-                        ELSE ST_SetSRID(ST_MakePoint(:end_lng, :end_lat), 4326)
-                    END,
+                    CAST(
+                        CASE
+                            WHEN :end_lat IS NULL OR :end_lng IS NULL THEN NULL
+                            ELSE ST_SetSRID(ST_MakePoint(:end_lng, :end_lat), 4326)
+                        END AS geometry
+                    ),
                     :mode,
                     :priority,
                     :segment_ids,
