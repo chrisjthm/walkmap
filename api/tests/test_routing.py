@@ -4,7 +4,7 @@ import json
 
 from sqlalchemy import text
 
-from app.routing import Coordinate, suggest_point_to_point_routes
+from app.routing import Coordinate, suggest_loop_routes, suggest_point_to_point_routes
 from app.routing_graph import refresh_graph
 
 
@@ -162,6 +162,64 @@ def _build_priority_mode_graph(db_connection) -> None:
     )
     _insert_poi(db_connection, "poi-priority-1", "POINT(-74.0204 40.0200)")
     _insert_poi(db_connection, "poi-priority-2", "POINT(-74.0216 40.0200)")
+
+
+def _build_loop_graph(db_connection) -> None:
+    loop_segments = [
+        (
+            "40:1:2:0",
+            "LINESTRING(-74.0500 40.0500, -74.0500 40.0530)",
+            92.0,
+        ),
+        (
+            "41:2:3:0",
+            "LINESTRING(-74.0500 40.0530, -74.0465 40.0515)",
+            91.0,
+        ),
+        (
+            "42:3:1:0",
+            "LINESTRING(-74.0465 40.0515, -74.0500 40.0500)",
+            90.0,
+        ),
+        (
+            "43:1:4:0",
+            "LINESTRING(-74.0500 40.0500, -74.0460 40.0500)",
+            84.0,
+        ),
+        (
+            "44:4:5:0",
+            "LINESTRING(-74.0460 40.0500, -74.0475 40.0465)",
+            83.0,
+        ),
+        (
+            "45:5:1:0",
+            "LINESTRING(-74.0475 40.0465, -74.0500 40.0500)",
+            82.0,
+        ),
+        (
+            "46:1:6:0",
+            "LINESTRING(-74.0500 40.0500, -74.0500 40.0470)",
+            76.0,
+        ),
+        (
+            "47:6:7:0",
+            "LINESTRING(-74.0500 40.0470, -74.0535 40.0485)",
+            75.0,
+        ),
+        (
+            "48:7:1:0",
+            "LINESTRING(-74.0535 40.0485, -74.0500 40.0500)",
+            74.0,
+        ),
+    ]
+    for segment_id, wkt, composite_score in loop_segments:
+        _insert_segment(
+            db_connection,
+            segment_id,
+            wkt,
+            composite_score=composite_score,
+            osm_tags={"highway": "footway"},
+        )
 
 
 def _jaccard_similarity(first: set[str], second: set[str]) -> float:
@@ -323,3 +381,38 @@ def test_routing_excludes_non_pedestrian_edges(db_connection) -> None:
 
     assert len(routes) == 1
     assert routes[0].segment_ids == ["11:10:12:0", "12:12:11:0"]
+
+
+def test_loop_routes_return_closed_low_overlap_candidates(db_connection) -> None:
+    _build_loop_graph(db_connection)
+    refresh_graph(connection=db_connection)
+
+    routes = suggest_loop_routes(
+        Coordinate(lat=40.05001, lng=-74.05001),
+        distance_m=1000.0,
+    )
+
+    assert len(routes) >= 2
+    for route in routes:
+        assert route.segment_ids
+        assert route.node_ids[0] == route.node_ids[-1]
+        assert len(route.segment_ids) == len(set(route.segment_ids))
+        assert abs(route.distance_m - 1000.0) <= 150.0
+
+    assert _jaccard_similarity(set(routes[0].segment_ids), set(routes[1].segment_ids)) < 0.5
+
+
+def test_loop_routes_return_best_effort_when_target_is_unreachable(db_connection) -> None:
+    _build_loop_graph(db_connection)
+    refresh_graph(connection=db_connection)
+
+    routes = suggest_loop_routes(
+        Coordinate(lat=40.05001, lng=-74.05001),
+        distance_m=2500.0,
+        candidate_count=1,
+    )
+
+    assert len(routes) == 1
+    assert routes[0].node_ids[0] == routes[0].node_ids[-1]
+    assert len(routes[0].segment_ids) == len(set(routes[0].segment_ids))
+    assert 800.0 <= routes[0].distance_m <= 1100.0
