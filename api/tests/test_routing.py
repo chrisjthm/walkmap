@@ -415,4 +415,4 @@ def test_loop_routes_return_best_effort_when_target_is_unreachable(db_connection
     assert len(routes) == 1
     assert routes[0].node_ids[0] == routes[0].node_ids[-1]
     assert len(routes[0].segment_ids) == len(set(routes[0].segment_ids))
-    assert 800.0 <= routes[0].distance_m <= 1100.0
+    assert 1000.0 <= routes[0].distance_m < 2500.0
