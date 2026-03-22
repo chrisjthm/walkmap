@@ -15,6 +15,14 @@ _ALT_PERTURBATION_MAX = 0.12
 _OVERLAP_PENALTY = 2.5
 _MIN_ROUTE_WEIGHT = 0.01
 _EARTH_RADIUS_M = 6_371_000.0
+_LOOP_DISTANCE_TOLERANCE_RATIO = 0.15
+_LOOP_NODE_SHORTLIST = 16
+_LOOP_DIRECTIONS = (
+    (7, (0.0, 1.0)),
+    (19, (1.0, 0.0)),
+    (43, (0.0, -1.0)),
+    (71, (-1.0, 0.0)),
+)
 
 _PEDESTRIAN_EXCLUDED_HIGHWAYS = {
     "motorway",
@@ -110,6 +118,61 @@ def suggest_point_to_point_routes(
             break
 
     return candidates
+
+
+def suggest_loop_routes(
+    start: Coordinate,
+    *,
+    distance_m: float,
+    priority: str = "highest-rated",
+    candidate_count: int = 3,
+) -> list[RouteCandidate]:
+    graph = get_graph()
+    if graph.number_of_nodes() == 0 or distance_m <= 0:
+        return []
+
+    start_node = snap_coordinate_to_node(graph, start)
+    attempts: list[RouteCandidate] = []
+
+    for seed, direction_vector in _LOOP_DIRECTIONS:
+        projected = _build_search_graph(
+            graph,
+            priority=priority,
+            penalized_segment_ids=set(),
+            seed=seed,
+        )
+        candidate = _build_loop_candidate(
+            graph,
+            projected,
+            start_node=start_node,
+            target_distance_m=distance_m,
+            direction_vector=direction_vector,
+        )
+        if candidate is None:
+            continue
+        attempts.append(candidate)
+
+    attempts.sort(
+        key=lambda candidate: (
+            0 if _is_within_loop_tolerance(candidate.distance_m, distance_m) else 1,
+            abs(candidate.distance_m - distance_m),
+            -candidate.avg_score,
+        )
+    )
+
+    selected: list[RouteCandidate] = []
+    used_segment_sets: list[set[str]] = []
+
+    for candidate in attempts:
+        segment_set = set(candidate.segment_ids)
+        if any(_jaccard_similarity(segment_set, existing) >= 0.5 for existing in used_segment_sets):
+            continue
+        selected.append(candidate)
+        used_segment_sets.append(segment_set)
+        if len(selected) >= max(1, min(candidate_count, 3)):
+            break
+
+    return selected
 
 
 def snap_coordinate_to_node(graph: nx.MultiDiGraph, coordinate: Coordinate) -> str:
@@ -234,6 +297,92 @@ def _coordinate_from_node(graph: nx.MultiDiGraph, node_id: str) -> Coordinate:
     return Coordinate(lat=float(node["lat"]), lng=float(node["lng"]))
 
 
+def _build_loop_candidate(
+    graph: nx.MultiDiGraph,
+    projected: nx.DiGraph,
+    *,
+    start_node: str,
+    target_distance_m: float,
+    direction_vector: tuple[float, float],
+) -> RouteCandidate | None:
+    try:
+        _, outbound_paths = nx.single_source_dijkstra(projected, start_node, weight="weight")
+        _, reverse_paths = nx.single_source_dijkstra(
+            projected.reverse(copy=False),
+            start_node,
+            weight="weight",
+        )
+    except nx.NetworkXNoPath:
+        return None
+
+    ranked_nodes: list[tuple[tuple[int, float, float], str]] = []
+    for node_id, outbound_path in outbound_paths.items():
+        if node_id == start_node or node_id not in reverse_paths:
+            continue
+
+        alignment = _direction_alignment(graph, start_node, node_id, direction_vector)
+        if alignment <= 0.0:
+            continue
+
+        approximate_return_path = list(reversed(reverse_paths[node_id]))
+        approximate_round_trip_distance = (
+            _path_distance_m(graph, projected, outbound_path)
+            + _path_distance_m(graph, projected, approximate_return_path)
+        )
+        ranked_nodes.append(
+            (
+                (
+                    0 if _is_within_loop_tolerance(approximate_round_trip_distance, target_distance_m) else 1,
+                    abs(approximate_round_trip_distance - target_distance_m),
+                    -alignment,
+                ),
+                node_id,
+            )
+        )
+
+    if not ranked_nodes:
+        return None
+
+    best_candidate: RouteCandidate | None = None
+    best_score: tuple[int, float, float] | None = None
+
+    for _rank, node_id in sorted(ranked_nodes)[:_LOOP_NODE_SHORTLIST]:
+        outbound_path = outbound_paths[node_id]
+        outbound_segment_ids = set(_segment_ids_for_path(projected, outbound_path))
+        if not outbound_segment_ids:
+            continue
+
+        reduced = _projected_without_segments(projected, outbound_segment_ids)
+        try:
+            return_path = nx.astar_path(
+                reduced,
+                node_id,
+                start_node,
+                heuristic=lambda _a, _b: 0.0,
+                weight="weight",
+            )
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            continue
+
+        node_path = outbound_path + return_path[1:]
+        candidate = _candidate_from_path(graph, projected, node_path)
+        if candidate.node_ids[0] != candidate.node_ids[-1]:
+            continue
+        if len(candidate.segment_ids) != len(set(candidate.segment_ids)):
+            continue
+
+        candidate_score = (
+            0 if _is_within_loop_tolerance(candidate.distance_m, target_distance_m) else 1,
+            abs(candidate.distance_m - target_distance_m),
+            -candidate.avg_score,
+        )
+        if best_score is None or candidate_score < best_score:
+            best_candidate = candidate
+            best_score = candidate_score
+
+    return best_candidate
+
+
 def _effective_weight(edge_data: dict[str, Any], *, priority: str) -> float:
     base_weight = max(_MIN_ROUTE_WEIGHT, float(edge_data.get("weight") or 0.0))
 
@@ -299,6 +448,66 @@ def _select_reachable_node_pair(
     return start_candidates[0][0], end_candidates[0][0]
 
 
+def _projected_without_segments(
+    projected: nx.DiGraph,
+    segment_ids: set[str],
+) -> nx.DiGraph:
+    reduced = projected.copy()
+    for u, v, edge_data in list(reduced.edges(data=True)):
+        if edge_data.get("segment_id") in segment_ids:
+            reduced.remove_edge(u, v)
+    return reduced
+
+
+def _segment_ids_for_path(projected: nx.DiGraph, node_path: list[str]) -> list[str]:
+    segment_ids: list[str] = []
+    for u, v in zip(node_path, node_path[1:]):
+        edge_data = projected.get_edge_data(u, v)
+        if edge_data is None:
+            continue
+        segment_id = edge_data.get("segment_id")
+        if segment_id is not None:
+            segment_ids.append(str(segment_id))
+    return segment_ids
+
+
+def _path_distance_m(
+    graph: nx.MultiDiGraph,
+    projected: nx.DiGraph,
+    node_path: list[str],
+) -> float:
+    distance_m = 0.0
+    for u, v in zip(node_path, node_path[1:]):
+        edge_data = projected.get_edge_data(u, v)
+        if edge_data is None:
+            continue
+        segment_id = edge_data.get("segment_id")
+        if segment_id is None:
+            continue
+        distance_m += float(graph[u][v][segment_id].get("distance_m") or 0.0)
+    return distance_m
+
+
+def _direction_alignment(
+    graph: nx.MultiDiGraph,
+    start_node: str,
+    end_node: str,
+    direction_vector: tuple[float, float],
+) -> float:
+    start = graph.nodes[start_node]
+    end = graph.nodes[end_node]
+    average_lat_rad = math.radians((float(start["lat"]) + float(end["lat"])) / 2.0)
+    delta_x = (float(end["lng"]) - float(start["lng"])) * math.cos(average_lat_rad)
+    delta_y = float(end["lat"]) - float(start["lat"])
+    magnitude = math.hypot(delta_x, delta_y)
+    if magnitude == 0.0:
+        return 0.0
+
+    unit_x = delta_x / magnitude
+    unit_y = delta_y / magnitude
+    return (unit_x * direction_vector[0]) + (unit_y * direction_vector[1])
+
+
 def _nearest_nodes(
     graph: nx.MultiDiGraph,
     coordinate: Coordinate,
@@ -335,6 +544,14 @@ def _jaccard_similarity(first: set[str], second: set[str]) -> float:
     if not union:
         return 0.0
     return len(first & second) / len(union)
+
+
+def _is_within_loop_tolerance(actual_distance_m: float, target_distance_m: float) -> bool:
+    if target_distance_m <= 0.0:
+        return False
+    return abs(actual_distance_m - target_distance_m) <= (
+        target_distance_m * _LOOP_DISTANCE_TOLERANCE_RATIO
+    )
 
 
 def _haversine_m(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:
