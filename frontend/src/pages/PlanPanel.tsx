@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   formatCoordinateLabel,
+  type LocationSearchSuggestion,
   LOCATION_PRESETS,
   measurementToMeters,
   parseLocationInput,
@@ -39,6 +40,10 @@ const PRIORITY_MODES: Array<{ value: PriorityMode; label: string; tone: string }
   { value: "residential", label: "Residential", tone: "Calmer neighborhood stretches" },
   { value: "explore", label: "Explore", tone: "Unexpected scenic variety" },
 ];
+const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_MIN_QUERY_LENGTH = 3;
+const SUGGESTION_LIMIT = 5;
+type LocationField = "start" | "end";
 
 const friendlyError = (message: string | undefined) => {
   if (!message) {
@@ -70,6 +75,39 @@ const getApiBase = () => {
   return rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
 };
 
+const presetSuggestions = (query: string): LocationSearchSuggestion[] => {
+  const normalizedQuery = query.trim().toLowerCase();
+  const matches = LOCATION_PRESETS.filter((location) =>
+    !normalizedQuery || location.label.toLowerCase().includes(normalizedQuery),
+  ).slice(0, SUGGESTION_LIMIT);
+
+  return matches.map((location) => ({
+    id: `preset:${location.label}`,
+    label: location.label,
+    lat: location.lat,
+    lng: location.lng,
+    kind: "landmark",
+    secondaryText: "Saved local landmark",
+  }));
+};
+
+const mergeSuggestions = (
+  presets: LocationSearchSuggestion[],
+  remote: LocationSearchSuggestion[],
+) => {
+  const merged = [...presets];
+  const seen = new Set(merged.map((item) => item.label.toLowerCase()));
+  for (const result of remote) {
+    const key = result.label.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    merged.push(result);
+    seen.add(key);
+  }
+  return merged.slice(0, SUGGESTION_LIMIT);
+};
+
 export default function PlanPanel() {
   const {
     form,
@@ -83,6 +121,12 @@ export default function PlanPanel() {
   } = useRoutePlanner();
 
   const apiBase = useMemo(() => getApiBase(), []);
+  const [activeField, setActiveField] = useState<LocationField | null>(null);
+  const [startSuggestions, setStartSuggestions] = useState<LocationSearchSuggestion[]>([]);
+  const [endSuggestions, setEndSuggestions] = useState<LocationSearchSuggestion[]>([]);
+  const [searchLoadingField, setSearchLoadingField] = useState<LocationField | null>(null);
+  const [searchMessage, setSearchMessage] = useState<string | null>(null);
+  const blurTimeoutRef = useRef<number | null>(null);
   const needsEndPoint = form.mode !== "loop";
   const distanceMeters = measurementToMeters(
     form.measurement,
@@ -98,6 +142,7 @@ export default function PlanPanel() {
     }
 
     setError(null);
+    setSearchMessage(null);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const next = {
@@ -108,7 +153,9 @@ export default function PlanPanel() {
           ...current,
           start: next,
           startLabel: `Current location · ${formatCoordinateLabel(next)}`,
+          startResolvedLabel: `Current location · ${formatCoordinateLabel(next)}`,
         }));
+        setStartSuggestions([]);
       },
       () => {
         setError("We couldn’t access your location. You can still paste coordinates or choose a saved landmark.");
@@ -120,6 +167,157 @@ export default function PlanPanel() {
     );
   };
 
+  useEffect(() => {
+    const query = form.startLabel.trim();
+    const parsed = parseLocationInput(form.startLabel);
+    const presets = presetSuggestions(query);
+
+    if (!query) {
+      setStartSuggestions(presets);
+      setSearchLoadingField((current) => (current === "start" ? null : current));
+      return;
+    }
+
+    if (parsed || (form.start && form.startResolvedLabel === form.startLabel)) {
+      setStartSuggestions(presets.filter((suggestion) => suggestion.label === form.startLabel));
+      setSearchLoadingField((current) => (current === "start" ? null : current));
+      return;
+    }
+
+    if (query.length < SEARCH_MIN_QUERY_LENGTH) {
+      setStartSuggestions(presets);
+      setSearchLoadingField((current) => (current === "start" ? null : current));
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      setSearchLoadingField("start");
+      try {
+        const response = await fetch(
+          `${apiBase ? `${apiBase}` : ""}/locations/search?q=${encodeURIComponent(query)}&limit=${SUGGESTION_LIMIT}`,
+        );
+        const payload = (await response.json()) as {
+          detail?: string;
+          results?: LocationSearchSuggestion[];
+        };
+        if (!response.ok || !Array.isArray(payload.results)) {
+          throw new Error(payload.detail || "Location search is temporarily unavailable.");
+        }
+        setStartSuggestions(mergeSuggestions(presets, payload.results));
+        setSearchMessage(null);
+      } catch (searchError) {
+        setStartSuggestions(presets);
+        setSearchMessage(
+          searchError instanceof Error
+            ? searchError.message
+            : "Location search is temporarily unavailable.",
+        );
+      } finally {
+        setSearchLoadingField((current) => (current === "start" ? null : current));
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [apiBase, form.start, form.startLabel, form.startResolvedLabel]);
+
+  useEffect(() => {
+    const query = form.endLabel.trim();
+    const parsed = parseLocationInput(form.endLabel);
+    const presets = presetSuggestions(query);
+
+    if (!needsEndPoint) {
+      setEndSuggestions([]);
+      setSearchLoadingField((current) => (current === "end" ? null : current));
+      return;
+    }
+
+    if (!query) {
+      setEndSuggestions(presets);
+      setSearchLoadingField((current) => (current === "end" ? null : current));
+      return;
+    }
+
+    if (parsed || (form.end && form.endResolvedLabel === form.endLabel)) {
+      setEndSuggestions(presets.filter((suggestion) => suggestion.label === form.endLabel));
+      setSearchLoadingField((current) => (current === "end" ? null : current));
+      return;
+    }
+
+    if (query.length < SEARCH_MIN_QUERY_LENGTH) {
+      setEndSuggestions(presets);
+      setSearchLoadingField((current) => (current === "end" ? null : current));
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      setSearchLoadingField("end");
+      try {
+        const response = await fetch(
+          `${apiBase ? `${apiBase}` : ""}/locations/search?q=${encodeURIComponent(query)}&limit=${SUGGESTION_LIMIT}`,
+        );
+        const payload = (await response.json()) as {
+          detail?: string;
+          results?: LocationSearchSuggestion[];
+        };
+        if (!response.ok || !Array.isArray(payload.results)) {
+          throw new Error(payload.detail || "Location search is temporarily unavailable.");
+        }
+        setEndSuggestions(mergeSuggestions(presets, payload.results));
+        setSearchMessage(null);
+      } catch (searchError) {
+        setEndSuggestions(presets);
+        setSearchMessage(
+          searchError instanceof Error
+            ? searchError.message
+            : "Location search is temporarily unavailable.",
+        );
+      } finally {
+        setSearchLoadingField((current) => (current === "end" ? null : current));
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [apiBase, form.end, form.endLabel, form.endResolvedLabel, needsEndPoint]);
+
+  const openField = (field: LocationField) => {
+    if (blurTimeoutRef.current) {
+      window.clearTimeout(blurTimeoutRef.current);
+      blurTimeoutRef.current = null;
+    }
+    setActiveField(field);
+  };
+
+  const closeFieldSoon = () => {
+    blurTimeoutRef.current = window.setTimeout(() => {
+      setActiveField(null);
+    }, 120);
+  };
+
+  const applySuggestion = (field: LocationField, suggestion: LocationSearchSuggestion) => {
+    setSearchMessage(null);
+    setForm((current) => (
+      field === "start"
+        ? {
+            ...current,
+            startLabel: suggestion.label,
+            start: { lat: suggestion.lat, lng: suggestion.lng },
+            startResolvedLabel: suggestion.label,
+          }
+        : {
+            ...current,
+            endLabel: suggestion.label,
+            end: { lat: suggestion.lat, lng: suggestion.lng },
+            endResolvedLabel: suggestion.label,
+          }
+    ));
+    if (field === "start") {
+      setStartSuggestions([]);
+    } else {
+      setEndSuggestions([]);
+    }
+    setActiveField(null);
+  };
+
   const submitRoutes = async () => {
     const start = form.start ?? parseLocationInput(form.startLabel);
     const end = needsEndPoint
@@ -127,17 +325,18 @@ export default function PlanPanel() {
       : null;
 
     if (!start) {
-      setError("Choose a starting point from the list, use your location, or paste coordinates like 40.7178, -74.0431.");
+      setError("Choose a starting point from the suggestions, use your location, or paste coordinates like 40.7178, -74.0431.");
       return;
     }
 
     if (needsEndPoint && !end) {
-      setError("Add an end point for this route mode before searching.");
+      setError("Choose an end point from the suggestions or paste coordinates before searching.");
       return;
     }
 
     setLoading(true);
     setError(null);
+    setSearchMessage(null);
     clearRoutes();
 
     try {
@@ -199,6 +398,52 @@ export default function PlanPanel() {
     }
   };
 
+  const renderSuggestions = (
+    field: LocationField,
+    suggestions: LocationSearchSuggestion[],
+  ) => {
+    const isOpen = activeField === field;
+    if (!isOpen) {
+      return null;
+    }
+
+    const isLoading = searchLoadingField === field;
+    const showEmpty = !isLoading && suggestions.length === 0;
+
+    return (
+      <div className="planner-suggestions" role="listbox" aria-label={`${field} suggestions`}>
+        {isLoading && (
+          <div className="planner-suggestion-meta">Searching places…</div>
+        )}
+        {!isLoading && suggestions.map((suggestion) => (
+          <button
+            key={suggestion.id}
+            className="planner-suggestion"
+            type="button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              applySuggestion(field, suggestion);
+            }}
+          >
+            <span className="planner-suggestion-label">{suggestion.label}</span>
+            {suggestion.secondaryText && (
+              <span className="planner-suggestion-copy">
+                {suggestion.secondaryText}
+              </span>
+            )}
+          </button>
+        ))}
+        {showEmpty && (
+          <div className="planner-suggestion-meta">
+            No matches yet. Try a fuller address, business name, or landmark.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const plannerMessage = searchMessage ?? error;
+
   return (
     <>
       <section className="panel-section">
@@ -216,20 +461,31 @@ export default function PlanPanel() {
             <label className="panel-label" htmlFor="start">
               Start Location
             </label>
-            <div className="planner-input-row">
+            <div
+              className="planner-location-search"
+              onFocus={() => openField("start")}
+              onBlur={closeFieldSoon}
+            >
+              <div className="planner-input-row">
               <input
                 className="panel-input"
                 id="start"
-                list="planner-locations"
                 placeholder="Search a landmark or paste lat,lng"
                 type="text"
                 value={form.startLabel}
                 onChange={(event) => {
                   const nextLabel = event.target.value;
+                  const parsed = parseLocationInput(nextLabel);
                   setForm((current) => ({
                     ...current,
                     startLabel: nextLabel,
-                    start: parseLocationInput(nextLabel),
+                    start: parsed,
+                    startResolvedLabel:
+                      parsed
+                        ? nextLabel
+                        : current.startResolvedLabel === nextLabel
+                          ? current.startResolvedLabel
+                          : null,
                   }));
                 }}
               />
@@ -240,9 +496,11 @@ export default function PlanPanel() {
               >
                 Use My Location
               </button>
+              </div>
+              {renderSuggestions("start", startSuggestions)}
             </div>
             <p className="planner-helper">
-              Saved Jersey City landmarks autocomplete here, or enter coordinates directly.
+              Search an address, business, or landmark, or enter coordinates directly.
             </p>
           </div>
 
@@ -251,22 +509,35 @@ export default function PlanPanel() {
               <label className="panel-label" htmlFor="end">
                 End Location
               </label>
-              <input
-                className="panel-input"
-                id="end"
-                list="planner-locations"
-                placeholder="Search a landmark or paste lat,lng"
-                type="text"
-                value={form.endLabel}
-                onChange={(event) => {
-                  const nextLabel = event.target.value;
-                  setForm((current) => ({
-                    ...current,
-                    endLabel: nextLabel,
-                    end: parseLocationInput(nextLabel),
-                  }));
-                }}
-              />
+              <div
+                className="planner-location-search"
+                onFocus={() => openField("end")}
+                onBlur={closeFieldSoon}
+              >
+                <input
+                  className="panel-input"
+                  id="end"
+                  placeholder="Search a destination or paste lat,lng"
+                  type="text"
+                  value={form.endLabel}
+                  onChange={(event) => {
+                    const nextLabel = event.target.value;
+                    const parsed = parseLocationInput(nextLabel);
+                    setForm((current) => ({
+                      ...current,
+                      endLabel: nextLabel,
+                      end: parsed,
+                      endResolvedLabel:
+                        parsed
+                          ? nextLabel
+                          : current.endResolvedLabel === nextLabel
+                            ? current.endResolvedLabel
+                            : null,
+                    }));
+                  }}
+                />
+                {renderSuggestions("end", endSuggestions)}
+              </div>
             </div>
           )}
 
@@ -398,11 +669,6 @@ export default function PlanPanel() {
           </div>
         </div>
 
-        <datalist id="planner-locations">
-          {LOCATION_PRESETS.map((location) => (
-            <option key={location.label} value={location.label} />
-          ))}
-        </datalist>
       </section>
 
       <section className="panel-section">
@@ -421,9 +687,9 @@ export default function PlanPanel() {
             </button>
           ))}
         </div>
-        {error && (
+        {plannerMessage && (
           <div className="planner-error" role="alert">
-            {error}
+            {plannerMessage}
           </div>
         )}
         <button

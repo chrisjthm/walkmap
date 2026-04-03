@@ -18,6 +18,12 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "Running Alembic migrations..."
+for _ in {1..30}; do
+  if docker compose exec -T api alembic -c /app/alembic.ini upgrade head; then
+    exit 0
+  fi
+  sleep 2
+done
 
-docker compose exec -T api alembic -c /app/alembic.ini upgrade head
-
+echo "ERROR: Alembic migrations did not succeed after repeated retries." >&2
+exit 1

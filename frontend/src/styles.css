@@ -184,6 +184,57 @@
     color: #567160;
   }
 
+  .planner-location-search {
+    position: relative;
+  }
+
+  .planner-suggestions {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    right: 0;
+    z-index: 12;
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.45rem;
+    border-radius: 18px;
+    border: 1px solid rgba(15, 30, 27, 0.12);
+    background: rgba(247, 241, 230, 0.96);
+    box-shadow: 0 16px 32px -24px rgba(15, 30, 27, 0.55);
+    backdrop-filter: blur(10px);
+  }
+
+  .planner-suggestion {
+    display: grid;
+    gap: 0.18rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.65rem 0.75rem;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.72);
+    transition: border-color 0.18s ease, transform 0.18s ease;
+  }
+
+  .planner-suggestion:hover,
+  .planner-suggestion:focus-visible {
+    border-color: rgba(15, 30, 27, 0.18);
+    transform: translateY(-1px);
+  }
+
+  .planner-suggestion-label {
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #0f1e1b;
+  }
+
+  .planner-suggestion-copy,
+  .planner-suggestion-meta {
+    font-size: 0.74rem;
+    color: #567160;
+    line-height: 1.4;
+  }
+
   .planner-ghost-button {
     padding: 0.7rem 0.95rem;
     border-radius: 16px;

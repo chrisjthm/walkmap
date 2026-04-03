@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.ingest import (
     DEFAULT_BBOX,
@@ -23,6 +24,7 @@ from app.ingest import (
     ingest_segments,
     ingest_water_features,
 )
+from app.location_search import LocationSearchError, search_locations, should_search_query
 from app.routing import (
     Coordinate,
     RouteCandidate,
@@ -37,6 +39,7 @@ from app.segments_display import (
 )
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 _AUTH_SCHEME = HTTPBearer(auto_error=False)
 _ACTIVITY_SPEED_MPS = {
@@ -68,6 +71,15 @@ class RouteSaveRequest(BaseModel):
     distance_m: float = Field(gt=0)
     duration_s: int = Field(gt=0)
     avg_score: float
+
+
+class LocationSearchResultPayload(BaseModel):
+    id: str
+    label: str
+    lat: float
+    lng: float
+    kind: Literal["address", "business", "landmark", "coordinate", "other"]
+    secondary_text: str | None = None
 
 
 def _coordinate_model_to_domain(value: CoordinatePayload) -> Coordinate:
@@ -287,7 +299,10 @@ def _cors_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Handle startup/shutdown events for the API."""
-    refresh_graph()
+    try:
+        refresh_graph()
+    except SQLAlchemyError:
+        logger.warning("Skipping initial graph refresh because the database is not ready yet.")
     try:
         yield
     finally:
@@ -327,6 +342,37 @@ def _feature_collection(features: list[dict[str, Any]]) -> dict[str, Any]:
 def health() -> dict[str, str]:
     """Basic health check for the API."""
     return {"status": "ok"}
+
+
+@app.get("/locations/search")
+def locations_search(
+    q: str = Query(..., description="Mixed address / business / landmark query"),
+    limit: int = Query(5, ge=1, le=8),
+) -> dict[str, list[LocationSearchResultPayload]]:
+    if not should_search_query(q):
+        return {"results": []}
+
+    try:
+        results = search_locations(q, limit=limit)
+    except LocationSearchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Location search is temporarily unavailable.",
+        ) from exc
+
+    return {
+        "results": [
+            LocationSearchResultPayload(
+                id=result.id,
+                label=result.label,
+                lat=result.lat,
+                lng=result.lng,
+                kind=result.kind,
+                secondary_text=result.secondary_text,
+            )
+            for result in results
+        ]
+    }
 
 
 @app.post("/admin/ingest/osm")

@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RouteSuggestion } from "./routePlanner";
 
 const buildFeatureCollection = (scores: number[]) => ({
   type: "FeatureCollection",
@@ -22,11 +24,108 @@ const buildFeatureCollection = (scores: number[]) => ({
   })),
 });
 
+const ROUTE_FIXTURES: RouteSuggestion[] = [
+  {
+    routeId: "route-1",
+    segmentIds: ["seg-a", "seg-b"],
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [-74.0431, 40.7178],
+        [-74.041, 40.719],
+      ],
+    },
+    distanceM: 1600,
+    durationS: 1200,
+    avgScore: 92,
+    verifiedCount: 3,
+    unverifiedCount: 1,
+  },
+  {
+    routeId: "route-2",
+    segmentIds: ["seg-c", "seg-d"],
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [-74.047, 40.715],
+        [-74.045, 40.718],
+      ],
+    },
+    distanceM: 1750,
+    durationS: 1260,
+    avgScore: 88,
+    verifiedCount: 2,
+    unverifiedCount: 2,
+  },
+  {
+    routeId: "route-3",
+    segmentIds: ["seg-e", "seg-f"],
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [-74.05, 40.713],
+        [-74.048, 40.716],
+      ],
+    },
+    distanceM: 1900,
+    durationS: 1320,
+    avgScore: 84,
+    verifiedCount: 1,
+    unverifiedCount: 3,
+  },
+];
+
+function SeedRoutes({
+  routes = ROUTE_FIXTURES,
+  useRoutePlanner,
+}: {
+  routes?: RouteSuggestion[];
+  useRoutePlanner: typeof import("./routePlanner").useRoutePlanner;
+}) {
+  const { setRoutes } = useRoutePlanner();
+
+  useEffect(() => {
+    setRoutes(routes);
+    // Seed once for the test; re-seeding on every provider rerender resets selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return null;
+}
+
+const renderMapViewWithRoutes = async (routes: RouteSuggestion[] = ROUTE_FIXTURES) => {
+  const data = buildFeatureCollection([72, 80, 88, 94]);
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => data,
+  });
+  globalThis.fetch = fetchMock as typeof fetch;
+
+  const { RoutePlannerProvider, useRoutePlanner } = await import("./routePlanner");
+  const { default: MapView } = await import("./MapView");
+  const view = render(
+    <RoutePlannerProvider>
+      <SeedRoutes routes={routes} useRoutePlanner={useRoutePlanner} />
+      <MapView />
+    </RoutePlannerProvider>,
+  );
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  return view;
+}
+
 describe("MapView gradient refresh", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.stubEnv("VITE_E2E_MOCK_MAP", "true");
     vi.stubEnv("VITE_E2E", "true");
+    Object.defineProperty(window, "scrollTo", {
+      value: vi.fn() as unknown as typeof window.scrollTo,
+      writable: true,
+    });
   });
 
   afterEach(() => {
@@ -99,6 +198,10 @@ describe("MapView score breakdown", () => {
     vi.resetModules();
     vi.stubEnv("VITE_E2E_MOCK_MAP", "true");
     vi.stubEnv("VITE_E2E", "true");
+    Object.defineProperty(window, "scrollTo", {
+      value: vi.fn() as unknown as typeof window.scrollTo,
+      writable: true,
+    });
   });
 
   afterEach(() => {
@@ -241,5 +344,58 @@ describe("MapView score breakdown", () => {
     expect(
       screen.getByText("Score is based entirely on user ratings"),
     ).toBeTruthy();
+  });
+});
+
+describe("MapView route suggestions", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv("VITE_E2E_MOCK_MAP", "true");
+    vi.stubEnv("VITE_E2E", "true");
+    Object.defineProperty(window, "scrollTo", {
+      value: vi.fn() as unknown as typeof window.scrollTo,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("highlights the selected route card and de-emphasizes the others", async () => {
+    const { container } = await renderMapViewWithRoutes();
+
+    await screen.findByText(/suggested routes/i);
+
+    const cards = container.querySelectorAll<HTMLButtonElement>(".route-results-card");
+    expect(cards).toHaveLength(3);
+
+    const [route1, route2, route3] = Array.from(cards);
+
+    expect(route1.getAttribute("data-active")).toBe("true");
+    expect(route2.getAttribute("data-active")).toBe("false");
+    expect(route3.getAttribute("data-active")).toBe("false");
+
+    fireEvent.click(route2);
+
+    await waitFor(() => {
+      const updatedCards = container.querySelectorAll<HTMLButtonElement>(".route-results-card");
+      expect(updatedCards[0]?.getAttribute("data-active")).toBe("false");
+      expect(updatedCards[1]?.getAttribute("data-active")).toBe("true");
+      expect(updatedCards[2]?.getAttribute("data-active")).toBe("false");
+    });
+  });
+
+  it("renders route cards with distinct route colors", async () => {
+    const { container } = await renderMapViewWithRoutes();
+
+    await screen.findByText(/suggested routes/i);
+
+    const swatches = container.querySelectorAll<HTMLElement>(".planner-route-swatch");
+    expect(swatches).toHaveLength(3);
+
+    const colors = Array.from(swatches).map((swatch) => swatch.style.background);
+    expect(new Set(colors).size).toBe(3);
+    expect(colors).toEqual(["rgb(92, 166, 255)", "rgb(240, 138, 71)", "rgb(193, 123, 255)"]);
   });
 });

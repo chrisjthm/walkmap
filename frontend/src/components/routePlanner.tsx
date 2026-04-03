@@ -24,6 +24,13 @@ export type LocationDraft = Coordinate & {
   label: string;
 };
 
+export type LocationSearchSuggestion = Coordinate & {
+  id: string;
+  label: string;
+  kind: "address" | "business" | "landmark" | "coordinate" | "other";
+  secondaryText?: string | null;
+};
+
 export type RouteSuggestion = {
   routeId: string;
   geometry: {
@@ -41,8 +48,10 @@ export type RouteSuggestion = {
 export type RoutePlannerFormState = {
   startLabel: string;
   start: Coordinate | null;
+  startResolvedLabel: string | null;
   endLabel: string;
   end: Coordinate | null;
+  endResolvedLabel: string | null;
   mode: RouteMode;
   measurement: MeasurementMode;
   distanceMiles: number;
@@ -73,8 +82,10 @@ const DEFAULT_FORM: RoutePlannerFormState = {
     lat: 40.7178,
     lng: -74.0431,
   },
+  startResolvedLabel: "Jersey City Waterfront",
   endLabel: "",
   end: null,
+  endResolvedLabel: null,
   mode: "loop",
   measurement: "distance",
   distanceMiles: 3,
