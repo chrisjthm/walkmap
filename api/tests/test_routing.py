@@ -416,3 +416,52 @@ def test_loop_routes_return_best_effort_when_target_is_unreachable(db_connection
     assert routes[0].node_ids[0] == routes[0].node_ids[-1]
     assert len(routes[0].segment_ids) == len(set(routes[0].segment_ids))
     assert 1000.0 <= routes[0].distance_m < 2500.0
+
+
+def test_loop_routes_avoid_out_and_back_on_same_street(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "60:1:2:0",
+        "LINESTRING(-74.0600 40.0600, -74.0590 40.0600)",
+        composite_score=99.0,
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "60:2:1:0",
+        "LINESTRING(-74.0590 40.0600, -74.0600 40.0600)",
+        composite_score=99.0,
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "61:1:3:0",
+        "LINESTRING(-74.0600 40.0600, -74.0595 40.0609)",
+        composite_score=80.0,
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "62:3:4:0",
+        "LINESTRING(-74.0595 40.0609, -74.0588 40.0602)",
+        composite_score=80.0,
+        osm_tags={"highway": "footway"},
+    )
+    _insert_segment(
+        db_connection,
+        "63:4:1:0",
+        "LINESTRING(-74.0588 40.0602, -74.0600 40.0600)",
+        composite_score=80.0,
+        osm_tags={"highway": "footway"},
+    )
+    refresh_graph(connection=db_connection)
+
+    routes = suggest_loop_routes(
+        Coordinate(lat=40.0600, lng=-74.0600),
+        distance_m=220.0,
+        candidate_count=1,
+    )
+
+    assert len(routes) == 1
+    assert routes[0].node_ids[0] == routes[0].node_ids[-1]
+    assert routes[0].segment_ids == ["61:1:3:0", "62:3:4:0", "63:4:1:0"]

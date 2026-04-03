@@ -1,3 +1,4 @@
+import type { FeatureCollection, LineString } from "geojson";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -6,6 +7,7 @@ import {
   computeScoreAnchors,
   ScoreLegend,
 } from "./mapScoreUtils";
+import { useRoutePlanner } from "./routePlanner";
 
 type SegmentProperties = {
   segment_id?: string;
@@ -117,6 +119,21 @@ type MapHandlerEntry = {
 };
 
 type MapSourceData = SegmentCollection;
+type RouteSourceData = FeatureCollection<
+  LineString,
+  {
+    routeId: string;
+    routeIndex: number;
+    selected: boolean;
+  }
+>;
+
+type RouteScreenPath = {
+  routeId: string;
+  routeIndex: number;
+  selected: boolean;
+  d: string;
+};
 
 type MockSource = {
   _data: MapSourceData;
@@ -193,6 +210,10 @@ class MockMap {
 
   addLayer(layer: { id: string; layout?: Record<string, unknown>; paint?: Record<string, unknown> }) {
     this.layers.set(layer.id, { layout: layer.layout ?? {}, paint: layer.paint ?? {} });
+  }
+
+  moveLayer() {
+    return undefined;
   }
 
   getLayer(id: string) {
@@ -283,11 +304,34 @@ const buildDetail = (props: SegmentProperties): SegmentDetail => {
 };
 
 
+const formatMiles = (value: number) => `${value.toFixed(1)} mi`;
+
+const formatDuration = (seconds: number) => {
+  const totalMinutes = Math.max(1, Math.round(seconds / 60));
+  if (totalMinutes >= 60) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`;
+  }
+  return `${totalMinutes} min`;
+};
+
 export default function MapView() {
+  const {
+    routes,
+    selectedRouteId,
+    previewRouteId,
+    setSelectedRouteId,
+    setPreviewRouteId,
+  } = useRoutePlanner();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const debounceRef = useRef<number | undefined>(undefined);
   const lastSegmentsRef = useRef<SegmentCollection>(EMPTY_SEGMENTS);
+  const plannedRoutesRef = useRef<RouteSourceData>({
+    type: "FeatureCollection",
+    features: [],
+  });
   const gradientInitializedRef = useRef(false);
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
@@ -300,6 +344,39 @@ export default function MapView() {
     mode: "global",
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [routeScreenPaths, setRouteScreenPaths] = useState<RouteScreenPath[]>([]);
+  const previousRouteCountRef = useRef(0);
+  const plannedRoutes = useMemo<RouteSourceData>(
+    () => {
+      const activeRouteId = previewRouteId ?? selectedRouteId ?? routes[0]?.routeId ?? null;
+      return {
+        type: "FeatureCollection",
+        features: routes.map((route, index) => ({
+          type: "Feature",
+          geometry: route.geometry,
+          properties: {
+            routeId: route.routeId,
+            routeIndex: index,
+            selected: activeRouteId
+              ? route.routeId === activeRouteId
+              : index === 0,
+          },
+        })),
+      };
+    },
+    [previewRouteId, routes, selectedRouteId],
+  );
+
+  const routeOverlayViewBox = (() => {
+    const container = mapContainerRef.current;
+    const width = container?.clientWidth ?? 1;
+    const height = container?.clientHeight ?? 1;
+    return `0 0 ${Math.max(width, 1)} ${Math.max(height, 1)}`;
+  })();
+
+  useEffect(() => {
+    plannedRoutesRef.current = plannedRoutes;
+  }, [plannedRoutes]);
 
   useEffect(() => {
     setShowScoreBreakdown(false);
@@ -329,12 +406,17 @@ export default function MapView() {
     : [];
 
   const updateLayerVisibility = useCallback((map: maplibregl.Map) => {
+    const routeModeActive = routes.length > 0;
     const verifiedVisibility = overlayVisible ? "visible" : "none";
-    const unverifiedVisibility =
-      overlayVisible && !verifiedOnly ? "visible" : "none";
+    const unverifiedVisibility = overlayVisible && !verifiedOnly ? "visible" : "none";
 
     if (map.getLayer("segments-verified")) {
       map.setLayoutProperty("segments-verified", "visibility", verifiedVisibility);
+      map.setPaintProperty(
+        "segments-verified",
+        "line-opacity",
+        routeModeActive ? 0.18 : 0.9,
+      );
     }
     if (map.getLayer("segments-unverified")) {
       map.setLayoutProperty(
@@ -342,8 +424,13 @@ export default function MapView() {
         "visibility",
         unverifiedVisibility,
       );
+      map.setPaintProperty(
+        "segments-unverified",
+        "line-opacity",
+        routeModeActive ? 0.08 : 0.45,
+      );
     }
-  }, [overlayVisible, verifiedOnly]);
+  }, [overlayVisible, routes.length, verifiedOnly]);
 
   const updateSource = useCallback((map: maplibregl.Map, data: SegmentCollection) => {
     const source = map.getSource("segments") as maplibregl.GeoJSONSource | undefined;
@@ -365,6 +452,189 @@ export default function MapView() {
 
     setScoreLegend(legend);
   }, []);
+
+  const ensureRouteSuggestionLayers = useCallback((map: maplibregl.Map) => {
+    if (!map.getSource("route-suggestions")) {
+      map.addSource("route-suggestions", {
+        type: "geojson",
+        data: plannedRoutesRef.current,
+      });
+    } else {
+      const routeSource = map.getSource("route-suggestions") as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      routeSource?.setData(plannedRoutesRef.current);
+    }
+
+    if (!map.getLayer("route-suggestions")) {
+      map.addLayer({
+        id: "route-suggestions",
+        type: "line",
+        source: "route-suggestions",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+          paint: {
+            "line-color": [
+            "match",
+            ["get", "routeIndex"],
+            0,
+            "#5ca6ff",
+            1,
+            "#f08a47",
+            2,
+            "#c17bff",
+            "#5ca6ff",
+          ],
+            "line-width": [
+              "case",
+              ["get", "selected"],
+              ["interpolate", ["linear"], ["zoom"], 12, 5, 16, 8],
+              ["interpolate", ["linear"], ["zoom"], 12, 4, 16, 6],
+            ],
+            "line-opacity": [
+              "case",
+              ["get", "selected"],
+              1,
+              0.78,
+            ],
+            "line-dasharray": [
+              "case",
+              ["get", "selected"],
+              ["literal", [1, 0]],
+              ["literal", [1.2, 1.6]],
+            ],
+          },
+        });
+    }
+
+    if (!map.getLayer("route-suggestions-casing")) {
+      map.addLayer({
+        id: "route-suggestions-casing",
+        type: "line",
+        source: "route-suggestions",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+            "line-color": [
+              "case",
+              ["get", "selected"],
+              "rgba(247, 241, 230, 0.92)",
+              "rgba(10, 18, 16, 0.88)",
+            ],
+            "line-width": [
+              "case",
+              ["get", "selected"],
+              ["interpolate", ["linear"], ["zoom"], 12, 8, 16, 12],
+              ["interpolate", ["linear"], ["zoom"], 12, 6, 16, 9],
+            ],
+            "line-opacity": [
+              "case",
+              ["get", "selected"],
+              0.92,
+              0.65,
+            ],
+          },
+        }, "route-suggestions");
+    }
+
+    if (typeof map.moveLayer === "function") {
+      if (map.getLayer("route-suggestions-casing")) {
+        map.moveLayer("route-suggestions-casing");
+      }
+      if (map.getLayer("route-suggestions")) {
+        map.moveLayer("route-suggestions");
+      }
+    }
+  }, []);
+
+  const updateRouteScreenPaths = useCallback((map: maplibregl.Map) => {
+    const nextPaths = plannedRoutes.features
+      .map((feature) => {
+        const points = feature.geometry.coordinates.reduce<maplibregl.Point[]>(
+          (accumulator, [lng, lat]) => {
+            const point = map.project([lng, lat]);
+            if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
+              accumulator.push(point);
+            }
+            return accumulator;
+          },
+          [],
+        );
+
+        if (points.length < 2) {
+          return null;
+        }
+
+        const d = points
+          .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+          .join(" ");
+
+        return {
+          routeId: feature.properties.routeId,
+          routeIndex: feature.properties.routeIndex,
+          selected: feature.properties.selected,
+          d,
+        };
+      })
+      .filter((path): path is RouteScreenPath => path !== null);
+
+    setRouteScreenPaths(nextPaths);
+  }, [plannedRoutes.features]);
+
+  const fitMapToCoordinates = useCallback(
+    (coordinates: [number, number][], options?: { maxZoom?: number }) => {
+      const map = mapRef.current;
+      if (!map || coordinates.length === 0 || typeof map.fitBounds !== "function") {
+        return;
+      }
+      const viewportWidth = mapContainerRef.current?.clientWidth ?? window.innerWidth;
+      const isDesktop = viewportWidth > 900;
+
+      const [firstLng, firstLat] = coordinates[0];
+      let minLng = firstLng;
+      let maxLng = firstLng;
+      let minLat = firstLat;
+      let maxLat = firstLat;
+
+      for (const [lng, lat] of coordinates) {
+        minLng = Math.min(minLng, lng);
+        maxLng = Math.max(maxLng, lng);
+        minLat = Math.min(minLat, lat);
+        maxLat = Math.max(maxLat, lat);
+      }
+
+      map.fitBounds(
+        [
+          [minLng, minLat],
+          [maxLng, maxLat],
+        ],
+        {
+          padding: isDesktop
+            ? {
+                top: 88,
+                right: 96,
+                bottom: 228,
+                left: 452,
+              }
+            : {
+                top: 72,
+                right: 24,
+                bottom: 228,
+                left: 24,
+              },
+          duration: 950,
+          maxZoom: options?.maxZoom ?? 13.75,
+          pitch: 0,
+          bearing: 0,
+        },
+      );
+    },
+    [],
+  );
 
   const fetchSegments = useCallback(async (
     map: maplibregl.Map,
@@ -502,7 +772,6 @@ export default function MapView() {
           data: EMPTY_SEGMENTS,
         });
       }
-
       if (!map.getLayer("segments-unverified")) {
         map.addLayer({
           id: "segments-unverified",
@@ -540,6 +809,8 @@ export default function MapView() {
         });
       }
 
+      ensureRouteSuggestionLayers(map);
+
       updateLayerVisibility(map);
       fetchSegments(map, { refreshGradient: true });
     });
@@ -552,6 +823,15 @@ export default function MapView() {
         fetchSegments(map);
       }, 300);
     });
+
+    const syncRouteOverlay = () => {
+      updateRouteScreenPaths(map);
+    };
+
+    map.on("move", syncRouteOverlay);
+    map.on("moveend", syncRouteOverlay);
+    map.on("zoom", syncRouteOverlay);
+    map.on("load", syncRouteOverlay);
 
     const handleClick = (event: maplibregl.MapLayerMouseEvent) => {
       const features = map.queryRenderedFeatures(event.point, {
@@ -595,6 +875,10 @@ export default function MapView() {
     return () => {
       map.off("click", "segments-verified", handleClick);
       map.off("click", "segments-unverified", handleClick);
+      map.off("move", syncRouteOverlay);
+      map.off("moveend", syncRouteOverlay);
+      map.off("zoom", syncRouteOverlay);
+      map.off("load", syncRouteOverlay);
       map.remove();
       mapRef.current = null;
       if (import.meta.env.VITE_E2E === "true") {
@@ -602,7 +886,43 @@ export default function MapView() {
           .__walkmap__;
       }
     };
-  }, [apiBase, fetchSegmentDetail, fetchSegments, styleUrl, updateLayerVisibility]);
+  }, [apiBase, ensureRouteSuggestionLayers, fetchSegmentDetail, fetchSegments, styleUrl, updateLayerVisibility, updateRouteScreenPaths]);
+
+  useEffect(() => {
+    if (!mapRef.current) {
+      return;
+    }
+    if (!mapRef.current.isStyleLoaded()) {
+      return;
+    }
+    ensureRouteSuggestionLayers(mapRef.current);
+    updateRouteScreenPaths(mapRef.current);
+  }, [ensureRouteSuggestionLayers, plannedRoutes, updateRouteScreenPaths]);
+
+  useEffect(() => {
+    if (routes.length === 0) {
+      previousRouteCountRef.current = 0;
+      return;
+    }
+
+    const isFreshResultSet =
+      previousRouteCountRef.current === 0 || previousRouteCountRef.current !== routes.length;
+    previousRouteCountRef.current = routes.length;
+
+    if (isFreshResultSet) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      fitMapToCoordinates(
+        routes.flatMap((route) => route.geometry.coordinates),
+        { maxZoom: 13.5 },
+      );
+      return;
+    }
+
+    const activeRouteId = previewRouteId ?? selectedRouteId;
+    const activeRoute =
+      routes.find((route) => route.routeId === activeRouteId) ?? routes[0];
+    fitMapToCoordinates(activeRoute.geometry.coordinates, { maxZoom: 13.9 });
+  }, [fitMapToCoordinates, previewRouteId, routes, selectedRouteId]);
 
   useEffect(() => {
     if (!mapRef.current) {
@@ -614,6 +934,43 @@ export default function MapView() {
   return (
     <>
       <div ref={mapContainerRef} className="map-canvas" />
+      {routeScreenPaths.length > 0 && (
+        <svg
+          className="route-overlay-svg"
+          viewBox={routeOverlayViewBox}
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          {[...routeScreenPaths]
+            .sort((left, right) => Number(left.selected) - Number(right.selected))
+            .map((path) => {
+            const color = ["#5ca6ff", "#f08a47", "#c17bff"][path.routeIndex % 3];
+            return (
+              <g key={path.routeId}>
+                <path
+                  className="route-overlay-casing"
+                  d={path.d}
+                  style={{
+                    stroke: path.selected ? "rgba(247, 241, 230, 0.95)" : "rgba(10, 18, 16, 0.88)",
+                    opacity: path.selected ? 0.92 : 0.74,
+                    strokeWidth: path.selected ? 14 : 9,
+                  }}
+                />
+                <path
+                  className="route-overlay-line"
+                  d={path.d}
+                  style={{
+                    stroke: color,
+                    opacity: path.selected ? 1 : 0.82,
+                    strokeWidth: path.selected ? 8 : 6,
+                    strokeDasharray: path.selected ? "none" : "10 10",
+                  }}
+                />
+              </g>
+            );
+          })}
+        </svg>
+      )}
       <div className="map-surface" aria-hidden="true" />
       <div className="map-overlay">
         <div className="map-badge">Walkmap Live</div>
@@ -623,14 +980,29 @@ export default function MapView() {
           </p>
         </div>
         <div className="map-card">
-          <p className="text-sm uppercase tracking-[0.2em] text-sun">
-            Overlay status
-          </p>
-          <p className="mt-2 text-sm text-mist">
-            {overlayVisible
-              ? "Segment scores visible across the current viewport."
-              : "Overlay hidden. Toggle it back on to view segment scores."}
-          </p>
+          {routes.length > 0 ? (
+            <>
+              <p className="text-sm uppercase tracking-[0.2em] text-sun">
+                Route candidates live
+              </p>
+              <p className="mt-2 text-sm text-mist">
+                {selectedRouteId
+                  ? "Selected route is fully lit on the map while alternate drafts recede."
+                  : "Three route drafts are layered in distinct colors across the map."}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm uppercase tracking-[0.2em] text-sun">
+                Overlay status
+              </p>
+              <p className="mt-2 text-sm text-mist">
+                {overlayVisible
+                  ? "Segment scores visible across the current viewport."
+                  : "Overlay hidden. Toggle it back on to view segment scores."}
+              </p>
+            </>
+          )}
           {segmentsError && (
             <p className="mt-2 text-xs uppercase tracking-[0.2em] text-sun">
               Unable to load segments from the API.
@@ -765,16 +1137,67 @@ export default function MapView() {
         </div>
       )}
 
-      <div className="map-style-card">
-        <p className="text-xs uppercase tracking-[0.2em] text-moss">
-          Map style
-        </p>
-        <p className="mt-2 text-sm">
-          Using OpenFreeMap via <span className="font-semibold">{styleUrl}</span>.
-          Override with <span className="font-semibold">VITE_MAP_STYLE_URL</span>{" "}
-          if needed.
-        </p>
-      </div>
+      {routes.length > 0 && (
+        <div className="route-results-overlay">
+          <div className="route-results-header">
+            <p className="text-xs uppercase tracking-[0.2em] text-moss">
+              Suggested Routes
+            </p>
+            <span className="planner-result-count">{routes.length} drafts</span>
+          </div>
+          <div className="route-results-list">
+            {routes.map((route, index) => (
+              <button
+                key={route.routeId}
+                className="planner-route-card route-results-card"
+                data-active={(previewRouteId ?? selectedRouteId) === route.routeId}
+                type="button"
+                onClick={() => setSelectedRouteId(route.routeId)}
+                onMouseEnter={() => setPreviewRouteId(route.routeId)}
+                onMouseLeave={() => setPreviewRouteId(null)}
+                onFocus={() => setPreviewRouteId(route.routeId)}
+                onBlur={() => setPreviewRouteId(null)}
+              >
+                <div className="planner-route-header">
+                  <div className="planner-route-title-row">
+                    <span
+                      className="planner-route-swatch"
+                      style={{
+                        background: ["#5ca6ff", "#f08a47", "#c17bff"][index % 3],
+                      }}
+                    />
+                    <div>
+                      <p className="planner-route-index">Route {index + 1}</p>
+                      <h4>{formatMiles(route.distanceM / 1609.34)}</h4>
+                    </div>
+                  </div>
+                  <span className="planner-score-badge">
+                    Avg {Math.round(route.avgScore)}
+                  </span>
+                </div>
+                <div className="planner-route-stats">
+                  <span>{formatDuration(route.durationS)}</span>
+                  <span>{route.verifiedCount} verified</span>
+                  <span>{route.unverifiedCount} unverified</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!routes.length && (
+        <div className="map-style-card">
+          <p className="text-xs uppercase tracking-[0.2em] text-moss">
+            Map style
+          </p>
+          <p className="mt-2 text-sm">
+            Using OpenFreeMap via <span className="font-semibold">{styleUrl}</span>.
+            Override with <span className="font-semibold">VITE_MAP_STYLE_URL</span>{" "}
+            if needed.
+          </p>
+        </div>
+      )}
     </>
   );
 }

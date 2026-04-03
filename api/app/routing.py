@@ -164,7 +164,7 @@ def suggest_loop_routes(
     used_segment_sets: list[set[str]] = []
 
     for candidate in attempts:
-        segment_set = set(candidate.segment_ids)
+        segment_set = {_undirected_segment_key(segment_id) for segment_id in candidate.segment_ids}
         if any(_jaccard_similarity(segment_set, existing) >= 0.5 for existing in used_segment_sets):
             continue
         selected.append(candidate)
@@ -348,11 +348,14 @@ def _build_loop_candidate(
 
     for _rank, node_id in sorted(ranked_nodes)[:_LOOP_NODE_SHORTLIST]:
         outbound_path = outbound_paths[node_id]
-        outbound_segment_ids = set(_segment_ids_for_path(projected, outbound_path))
+        outbound_segment_ids = {
+            _undirected_segment_key(segment_id)
+            for segment_id in _segment_ids_for_path(projected, outbound_path)
+        }
         if not outbound_segment_ids:
             continue
 
-        reduced = _projected_without_segments(projected, outbound_segment_ids)
+        reduced = _projected_without_segments(projected, outbound_segment_ids, undirected=True)
         try:
             return_path = nx.astar_path(
                 reduced,
@@ -368,7 +371,10 @@ def _build_loop_candidate(
         candidate = _candidate_from_path(graph, projected, node_path)
         if candidate.node_ids[0] != candidate.node_ids[-1]:
             continue
-        if len(candidate.segment_ids) != len(set(candidate.segment_ids)):
+        undirected_segment_ids = [
+            _undirected_segment_key(segment_id) for segment_id in candidate.segment_ids
+        ]
+        if len(undirected_segment_ids) != len(set(undirected_segment_ids)):
             continue
 
         candidate_score = (
@@ -451,10 +457,20 @@ def _select_reachable_node_pair(
 def _projected_without_segments(
     projected: nx.DiGraph,
     segment_ids: set[str],
+    *,
+    undirected: bool = False,
 ) -> nx.DiGraph:
     reduced = projected.copy()
     for u, v, edge_data in list(reduced.edges(data=True)):
-        if edge_data.get("segment_id") in segment_ids:
+        segment_id = edge_data.get("segment_id")
+        if segment_id is None:
+            continue
+        comparison_id = (
+            _undirected_segment_key(str(segment_id))
+            if undirected
+            else str(segment_id)
+        )
+        if comparison_id in segment_ids:
             reduced.remove_edge(u, v)
     return reduced
 
@@ -544,6 +560,15 @@ def _jaccard_similarity(first: set[str], second: set[str]) -> float:
     if not union:
         return 0.0
     return len(first & second) / len(union)
+
+
+def _undirected_segment_key(segment_id: str) -> str:
+    parts = segment_id.split(":")
+    if len(parts) != 4:
+        return segment_id
+    osmid, start_node, end_node, edge_key = parts
+    low_node, high_node = sorted((start_node, end_node))
+    return f"{osmid}:{low_node}:{high_node}:{edge_key}"
 
 
 def _is_within_loop_tolerance(actual_distance_m: float, target_distance_m: float) -> bool:
