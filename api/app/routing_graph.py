@@ -35,6 +35,7 @@ class GraphCache:
     built_at: float
     node_count: int
     edge_count: int
+    segment_count: int
     component_count: int
     build_seconds: float
 
@@ -42,6 +43,14 @@ class GraphCache:
 def get_graph() -> nx.MultiDiGraph:
     cache = _GRAPH_CACHE
     if cache is None:
+        cache = refresh_graph()
+    elif cache.graph.number_of_nodes() == 0:
+        # Startup can build an empty graph before later ingest/score jobs populate
+        # the database. Treat an empty cache as stale and rebuild lazily on demand.
+        cache = refresh_graph()
+    elif _segment_count() != cache.segment_count:
+        # The graph cache can become stale when another process ingests or truncates
+        # segment data. Refresh lazily when the backing row count changes.
         cache = refresh_graph()
     return cache.graph
 
@@ -108,6 +117,7 @@ def _build_graph(connection: Connection, start_time: float) -> GraphCache:
         params["amenities"] = list(_DINING_AMENITIES)
 
     rows = connection.execute(query, params).mappings().all()
+    segment_count = len(rows)
 
     graph = nx.MultiDiGraph()
     skipped = 0
@@ -189,6 +199,7 @@ def _build_graph(connection: Connection, start_time: float) -> GraphCache:
         built_at=time.time(),
         node_count=node_count,
         edge_count=edge_count,
+        segment_count=segment_count,
         component_count=component_count,
         build_seconds=build_seconds,
     )
@@ -234,3 +245,9 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
         .scalar_one()
         is not None
     )
+
+
+def _segment_count() -> int:
+    engine = get_engine()
+    with engine.begin() as connection:
+        return int(connection.execute(text("SELECT COUNT(*) FROM segments")).scalar_one())

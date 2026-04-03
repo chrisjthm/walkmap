@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from unittest.mock import patch
 
 from sqlalchemy import text
 
-from app.routing_graph import refresh_graph
+from app import routing_graph
+from app.routing_graph import get_graph, refresh_graph
 
 
 def _insert_segment(
@@ -209,3 +211,45 @@ def test_refresh_graph_uses_indexable_nearest_poi_query() -> None:
     graph_query = next(query for query in connection.queries if "FROM segments s" in query)
     assert "JOIN LATERAL" in graph_query
     assert "ORDER BY s.geometry <-> p.geometry" in graph_query
+
+
+def test_get_graph_refreshes_stale_empty_cache(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "1:100:200:0",
+        "LINESTRING(-74.0000 40.0000, -74.0000 40.0005)",
+        composite_score=80.0,
+        osm_tags={"highway": "residential", "landuse": "residential"},
+    )
+
+    cache = refresh_graph(connection=db_connection)
+    routing_graph._GRAPH_CACHE = replace(cache, graph=cache.graph.__class__())
+
+    graph = get_graph()
+
+    assert graph.number_of_nodes() >= 2
+    assert graph.number_of_edges() == 1
+
+
+def test_get_graph_refreshes_when_segment_count_changes(db_connection) -> None:
+    _insert_segment(
+        db_connection,
+        "1:100:200:0",
+        "LINESTRING(-74.0000 40.0000, -74.0000 40.0005)",
+        composite_score=80.0,
+        osm_tags={"highway": "residential", "landuse": "residential"},
+    )
+    refresh_graph(connection=db_connection)
+
+    _insert_segment(
+        db_connection,
+        "2:200:300:0",
+        "LINESTRING(-74.0000 40.0005, -74.0005 40.0010)",
+        composite_score=70.0,
+        osm_tags={"highway": "footway"},
+    )
+
+    graph = get_graph()
+
+    assert graph.number_of_nodes() >= 3
+    assert graph.number_of_edges() == 2
