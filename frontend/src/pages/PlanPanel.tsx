@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../components/auth";
 import {
   formatCoordinateLabel,
   type LocationSearchSuggestion,
@@ -109,8 +111,13 @@ const mergeSuggestions = (
 };
 
 export default function PlanPanel() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { user, authFetch } = useAuth();
   const {
     form,
+    routes,
+    selectedRouteId,
     loading,
     error,
     setForm,
@@ -126,6 +133,9 @@ export default function PlanPanel() {
   const [endSuggestions, setEndSuggestions] = useState<LocationSearchSuggestion[]>([]);
   const [searchLoadingField, setSearchLoadingField] = useState<LocationField | null>(null);
   const [searchMessage, setSearchMessage] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [saveLoading, setSaveLoading] = useState(false);
   const blurTimeoutRef = useRef<number | null>(null);
   const needsEndPoint = form.mode !== "loop";
   const distanceMeters = measurementToMeters(
@@ -134,6 +144,7 @@ export default function PlanPanel() {
     form.durationMinutes,
     form.activity,
   );
+  const selectedRoute = routes.find((route) => route.routeId === selectedRouteId) ?? routes[0] ?? null;
 
   const onUseLocation = async () => {
     if (!navigator.geolocation) {
@@ -336,6 +347,8 @@ export default function PlanPanel() {
 
     setLoading(true);
     setError(null);
+    setSaveError(null);
+    setSaveSuccess(null);
     setSearchMessage(null);
     clearRoutes();
 
@@ -395,6 +408,71 @@ export default function PlanPanel() {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveRoute = async () => {
+    if (!selectedRoute) {
+      setSaveError("Find a route before saving it.");
+      return;
+    }
+
+    if (!user) {
+      navigate("/login", { state: { returnTo: location.pathname } });
+      return;
+    }
+
+    const start = form.start ?? parseLocationInput(form.startLabel);
+    const end = needsEndPoint
+      ? form.end ?? parseLocationInput(form.endLabel)
+      : null;
+
+    if (!start) {
+      setSaveError("Choose a starting point before saving the route.");
+      return;
+    }
+
+    if (needsEndPoint && !end) {
+      setSaveError("Choose an end point before saving the route.");
+      return;
+    }
+
+    setSaveLoading(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+
+    try {
+      const response = await authFetch(apiBase ? `${apiBase}/routes` : "/routes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          start,
+          end,
+          mode: form.mode,
+          priority: form.priority,
+          segment_ids: selectedRoute.segmentIds,
+          distance_m: selectedRoute.distanceM,
+          duration_s: selectedRoute.durationS,
+          avg_score: selectedRoute.avgScore,
+        }),
+      });
+
+      const payload = (await response.json()) as { detail?: string; route_id?: string };
+      if (!response.ok) {
+        throw new Error(payload.detail || "We couldn’t save this route right now.");
+      }
+
+      setSaveSuccess("Route saved.");
+    } catch (saveRouteError) {
+      setSaveError(
+        saveRouteError instanceof Error
+          ? saveRouteError.message
+          : "We couldn’t save this route right now.",
+      );
+    } finally {
+      setSaveLoading(false);
     }
   };
 
@@ -710,6 +788,26 @@ export default function PlanPanel() {
         <p className="planner-helper mt-3">
           Suggested routes appear directly on the map once they are ready.
         </p>
+        {routes.length > 0 && (
+          <>
+            <button
+              className="cta-button mt-4"
+              type="button"
+              disabled={saveLoading}
+              onClick={saveRoute}
+            >
+              {saveLoading ? "Saving Route..." : "Save Selected Route"}
+            </button>
+            {saveError && (
+              <div className="planner-error" role="alert">
+                {saveError}
+              </div>
+            )}
+            {saveSuccess && (
+              <p className="planner-helper mt-3">{saveSuccess}</p>
+            )}
+          </>
+        )}
       </section>
     </>
   );

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getApiBase, useAuth } from "../components/auth";
 
 type AuthSuccessPayload = {
@@ -11,6 +11,11 @@ type AuthSuccessPayload = {
 };
 
 const MIN_PASSWORD_LENGTH = 8;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type RegisterLocationState = {
+  returnTo?: string;
+};
 
 const normalizeErrorDetail = (detail: unknown): string | null => {
   if (typeof detail === "string" && detail.trim()) {
@@ -44,6 +49,7 @@ const parseErrorMessage = async (response: Response) => {
 };
 
 export default function RegisterPanel() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
@@ -57,6 +63,10 @@ export default function RegisterPanel() {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
       setError("Enter your email to create an account.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError("Enter a valid email address.");
       return;
     }
     if (password.length < MIN_PASSWORD_LENGTH) {
@@ -86,7 +96,8 @@ export default function RegisterPanel() {
 
       const payload = (await response.json()) as AuthSuccessPayload;
       setSession(payload.token, payload.user);
-      navigate("/");
+      const returnTo = (location.state as RegisterLocationState | null)?.returnTo ?? "/";
+      navigate(returnTo);
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -108,7 +119,7 @@ export default function RegisterPanel() {
       </section>
 
       <section className="panel-section">
-        <form className="panel-grid" onSubmit={onSubmit}>
+        <form className="panel-grid" noValidate onSubmit={onSubmit}>
           <div className="panel-field">
             <label className="panel-label" htmlFor="reg-email">
               Email

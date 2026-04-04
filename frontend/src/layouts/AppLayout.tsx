@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../components/auth";
 import MapView from "../components/MapView";
@@ -7,6 +7,7 @@ const PANEL_ROUTES = new Set(["/plan", "/explore", "/login", "/register"]);
 
 export default function AppLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, clearSession } = useAuth();
   const [panelOpen, setPanelOpen] = useState(PANEL_ROUTES.has(location.pathname));
 
@@ -75,7 +76,14 @@ export default function AppLayout() {
                 <p className="text-sm text-moss">
                   Signed in as {user.email}
                 </p>
-                <button className="planner-ghost-button" type="button" onClick={clearSession}>
+                <button
+                  className="planner-ghost-button"
+                  type="button"
+                  onClick={() => {
+                    clearSession();
+                    navigate("/login");
+                  }}
+                >
                   Log Out
                 </button>
               </div>
