@@ -1,11 +1,13 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "../components/auth";
 import MapView from "../components/MapView";
 
 const PANEL_ROUTES = new Set(["/plan", "/explore", "/login", "/register"]);
 
 export default function AppLayout() {
   const location = useLocation();
+  const { user, clearSession } = useAuth();
   const [panelOpen, setPanelOpen] = useState(PANEL_ROUTES.has(location.pathname));
 
   useEffect(() => {
@@ -68,10 +70,21 @@ export default function AppLayout() {
           </div>
 
           <section className="panel-section">
-            <p className="text-sm text-moss">
-              Status: Segments are live from the API. Route planning integrations
-              are next.
-            </p>
+            {user ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-moss">
+                  Signed in as {user.email}
+                </p>
+                <button className="planner-ghost-button" type="button" onClick={clearSession}>
+                  Log Out
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-moss">
+                Status: Segments are live from the API. Route planning integrations
+                are next.
+              </p>
+            )}
           </section>
         </div>
       </aside>

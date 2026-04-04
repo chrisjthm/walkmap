@@ -1,17 +1,21 @@
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any, Literal
 
+import bcrypt
+import jwt
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.ingest import (
     DEFAULT_BBOX,
@@ -42,6 +46,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _AUTH_SCHEME = HTTPBearer(auto_error=False)
+_EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_JWT_ALGORITHM = "HS256"
+_JWT_EXPIRY_HOURS = 24
 _ACTIVITY_SPEED_MPS = {
     "walk": 1.4,
     "run": 2.4,
@@ -51,6 +58,29 @@ _ACTIVITY_SPEED_MPS = {
 class CoordinatePayload(BaseModel):
     lat: float
     lng: float
+
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = _normalize_email(value)
+        if not _EMAIL_REGEX.match(normalized):
+            raise ValueError("invalid email address")
+        return normalized
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserResponse
 
 
 class RouteSuggestRequest(BaseModel):
@@ -80,6 +110,47 @@ class LocationSearchResultPayload(BaseModel):
     lng: float
     kind: Literal["address", "business", "landmark", "coordinate", "other"]
     secondary_text: str | None = None
+
+
+def _normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _jwt_secret() -> str:
+    secret = os.environ.get("JWT_SECRET")
+    if secret:
+        return secret
+    raise RuntimeError("JWT_SECRET is not set")
+
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def _create_access_token(user_id: uuid.UUID) -> str:
+    payload = {
+        "user_id": str(user_id),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=_JWT_EXPIRY_HOURS),
+    }
+    return jwt.encode(payload, _jwt_secret(), algorithm=_JWT_ALGORITHM)
+
+
+def _build_user_response(user_id: uuid.UUID, email: str) -> UserResponse:
+    return UserResponse(id=str(user_id), email=email)
+
+
+def _auth_response(user_id: uuid.UUID, email: str) -> AuthResponse:
+    return AuthResponse(
+        token=_create_access_token(user_id),
+        user=_build_user_response(user_id, email),
+    )
 
 
 def _coordinate_model_to_domain(value: CoordinatePayload) -> Coordinate:
@@ -127,9 +198,9 @@ def _serialize_route_candidate(candidate: RouteCandidate, *, activity: str) -> d
     }
 
 
-def _require_user_id(
+def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_AUTH_SCHEME),
-) -> uuid.UUID:
+) -> UserResponse:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -137,27 +208,43 @@ def _require_user_id(
         )
 
     try:
-        user_id = uuid.UUID(credentials.credentials)
-    except ValueError as exc:
+        payload = jwt.decode(
+            credentials.credentials,
+            _jwt_secret(),
+            algorithms=[_JWT_ALGORITHM],
+        )
+        user_id = uuid.UUID(str(payload["user_id"]))
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except (jwt.InvalidTokenError, KeyError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization token must be a user UUID",
+            detail="Invalid or expired authorization token",
         ) from exc
 
     engine = get_engine()
     with engine.begin() as connection:
-        user_exists = connection.execute(
-            text("SELECT 1 FROM users WHERE id = :user_id"),
+        row = connection.execute(
+            text(
+                """
+                SELECT id, email
+                FROM users
+                WHERE id = :user_id
+                """
+            ),
             {"user_id": user_id},
-        ).scalar()
+        ).mappings().first()
 
-    if user_exists is None:
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authenticated user not found",
         )
 
-    return user_id
+    return _build_user_response(row["id"], row["email"])
 
 
 def _suggest_routes(request: RouteSuggestRequest) -> list[RouteCandidate]:
@@ -342,6 +429,66 @@ def _feature_collection(features: list[dict[str, Any]]) -> dict[str, Any]:
 def health() -> dict[str, str]:
     """Basic health check for the API."""
     return {"status": "ok"}
+
+
+@app.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+def register(request: AuthRequest) -> AuthResponse:
+    engine = get_engine()
+    user_id = uuid.uuid4()
+    email = request.email
+    password_hash = _hash_password(request.password)
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO users (id, email, password_hash)
+                    VALUES (:user_id, :email, :password_hash)
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "email": email,
+                    "password_hash": password_hash,
+                },
+            )
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with that email already exists",
+        ) from exc
+
+    return _auth_response(user_id, email)
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+def login(request: AuthRequest) -> AuthResponse:
+    engine = get_engine()
+    with engine.begin() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT id, email, password_hash
+                FROM users
+                WHERE email = :email
+                """
+            ),
+            {"email": request.email},
+        ).mappings().first()
+
+    if row is None or not _verify_password(request.password, row["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    return _auth_response(row["id"], row["email"])
+
+
+@app.get("/auth/me", response_model=UserResponse)
+def auth_me(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
+    return current_user
 
 
 @app.get("/locations/search")
@@ -531,7 +678,8 @@ def suggest_routes(request: RouteSuggestRequest) -> dict[str, Any]:
 
 
 @app.post("/routes")
-def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_user_id)) -> dict[str, Any]:
+def save_route(request: RouteSaveRequest, current_user: UserResponse = Depends(get_current_user)) -> dict[str, Any]:
+    user_id = uuid.UUID(current_user.id)
     engine = get_engine()
     with engine.begin() as connection:
         _validate_route_save_request(connection, request)
@@ -603,7 +751,8 @@ def save_route(request: RouteSaveRequest, user_id: uuid.UUID = Depends(_require_
 
 
 @app.get("/users/me/routes")
-def get_my_routes(user_id: uuid.UUID = Depends(_require_user_id)) -> dict[str, Any]:
+def get_my_routes(current_user: UserResponse = Depends(get_current_user)) -> dict[str, Any]:
+    user_id = uuid.UUID(current_user.id)
     engine = get_engine()
     with engine.begin() as connection:
         rows = connection.execute(

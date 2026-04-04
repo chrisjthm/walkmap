@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
+import bcrypt
+import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -63,6 +67,7 @@ def _insert_segment(
 
 
 def _insert_user(db_connection, user_id: uuid.UUID) -> None:
+    password_hash = bcrypt.hashpw(b"password123", bcrypt.gensalt()).decode("utf-8")
     db_connection.execute(
         text(
             """
@@ -73,7 +78,7 @@ def _insert_user(db_connection, user_id: uuid.UUID) -> None:
         {
             "id": user_id,
             "email": f"{user_id}@example.com",
-            "password_hash": "not-a-real-hash",
+            "password_hash": password_hash,
         },
     )
 
@@ -101,7 +106,15 @@ def _build_loop_graph(db_connection) -> None:
 
 
 def _auth_headers(user_id: uuid.UUID) -> dict[str, str]:
-    return {"Authorization": f"Bearer {user_id}"}
+    token = jwt.encode(
+        {
+            "user_id": str(user_id),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+        },
+        os.environ["JWT_SECRET"],
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _jaccard_similarity(first: set[str], second: set[str]) -> float:
