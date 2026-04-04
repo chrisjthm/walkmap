@@ -11,6 +11,8 @@ from alembic.config import Config
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
+
 
 def _get_database_url() -> str | None:
     return os.environ.get("DATABASE_URL")

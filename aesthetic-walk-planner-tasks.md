@@ -727,7 +727,7 @@ On `POST /ratings`, the following must happen atomically in a single transaction
 
 ---
 
-### C4 — Routes API
+### C4 — Routes API [COMPLETED]
 
 **Description:**
 Endpoint that accepts route planning parameters, delegates to the routing engine (Stream D), and returns 2–3 suggested routes.
@@ -827,7 +827,7 @@ The implementation must:
 
 ---
 
-### D3 — Loop Routing
+### D3 — Loop Routing [COMPLETED]
 
 **Description:**
 Generate loop routes that start and end at the same node and cover approximately a target distance, maximizing aesthetic score.
@@ -1097,7 +1097,7 @@ Show two sections:
 8. `GET /segments/{id}` response includes a non-null `factors` field for all scored segments
 9. Tapping ⓘ a second time collapses the breakdown
 
-### E3 — Route Planner UI
+### E3 — Route Planner UI [COMPLETED]
 
 **Description:**
 Build the route planning side panel. User configures parameters and receives 2–3 route suggestions rendered on the map.
