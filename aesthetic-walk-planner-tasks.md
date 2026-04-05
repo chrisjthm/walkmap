@@ -24,12 +24,14 @@ Tasks are organized into parallel streams that can be executed concurrently by i
 | C | `[C]` | Backend API |
 | D | `[D]` | Routing Engine |
 | E | `[E]` | Frontend |
+| F | `[F]` | Maintainability & Refactoring |
 
 **Dependency summary:**
 - Stream B depends on A (needs the database)
 - Stream C depends on A (needs the database); can begin with stubbed responses before B completes
 - Stream D depends on B (needs scored segments in DB); can be developed against mock scored data in parallel
 - Stream E can begin immediately with mocked API responses; integrates fully once C and D are complete
+- Stream F depends on the relevant feature stream area being stable enough to refactor safely; tasks can be executed incrementally alongside C, D, and E
 
 ```
 A ──► B ──► D ──┐
@@ -538,7 +540,7 @@ Must handle interruption gracefully — can be stopped and resumed without repro
 
 *Depends on: A1, A2. Can begin with stubbed/mock responses before B completes.*
 
-### C1 — Auth Endpoints
+### C1 — Auth Endpoints [COMPLETED]
 
 **Description:**
 Implement email/password authentication using bcrypt for password hashing and PyJWT for token issuance.
@@ -1306,7 +1308,7 @@ Components:
 
 ---
 
-### E5 — Auth UI
+### E5 — Auth UI [COMPLETED]
 
 **Description:**
 Login and registration screens. Redirect unauthenticated users to `/login` when they attempt to rate or save a route. Store the JWT in React context (not localStorage or sessionStorage) and attach it to all API requests via an interceptor.
@@ -1325,6 +1327,38 @@ Login and registration screens. Redirect unauthenticated users to `/login` when 
 4. Refresh the page → user is logged out (JWT is not persisted — this is correct MVP behavior)
 5. Log out → subsequent `GET /auth/me` call returns 401 (token no longer attached to requests)
 6. Login with wrong password → server 401 shown as a user-facing error message in the form
+
+---
+
+### E5.1 — Auth UI: Persistent Login
+
+**Description:**
+Add persistent login so authenticated users remain signed in across page refreshes and browser restarts until they explicitly log out or the token expires. This is a follow-up to E5: the current MVP intentionally keeps auth in memory only, but the production-friendly UX should restore the session on app load.
+
+Implementation notes:
+- Persist the JWT in browser storage and hydrate auth state during app startup before protected UI decisions are made
+- On app boot, if a stored token exists, call `GET /auth/me` to validate it and fetch the current user before treating the session as active
+- If the stored token is expired, malformed, or rejected by the backend, clear it immediately and fall back to logged-out state without trapping the user in a broken session
+- Protected API requests should continue to attach `Authorization: Bearer <token>` automatically
+- Logging out must clear both in-memory auth state and the persisted token
+- While the initial auth restore check is in progress, use a lightweight loading/auth-resolving state so protected-route redirects do not flicker incorrectly
+
+**Completion criteria:**
+- Refreshing the page while logged in keeps the user signed in
+- Closing and reopening the browser restores the logged-in session if the token is still valid
+- Expired or invalid stored tokens are cleared automatically and the user is returned to logged-out state
+- Protected-route redirects wait until auth restoration completes, so a valid stored session does not bounce the user through `/login`
+- Logging out clears the persisted session and requires a fresh login on the next visit
+
+**Test cases:**
+1. Register or log in successfully, refresh the page → user remains logged in and user info still appears in the UI
+2. Log in, close the browser tab/window, reopen the app → session is restored without requiring login again
+3. Seed storage with a valid JWT, load the app → `GET /auth/me` succeeds and auth state hydrates correctly
+4. Seed storage with a malformed token, load the app → token is cleared, user is logged out, no infinite retry loop or crash
+5. Seed storage with an expired token, load the app → `GET /auth/me` returns 401, token is cleared, user is logged out
+6. Navigate directly to a protected action while a valid stored session is being restored → no redirect flicker to `/login`
+7. Click Log Out → persisted token removed, subsequent refresh stays logged out
+8. After logout, an authenticated API call does not include the old bearer token
 
 ---
 
@@ -1353,3 +1387,149 @@ These are not implementation tasks but observable checkpoints confirming streams
 ### M4 — Full Personal Beta Walk *(all streams complete)*
 
 **Verify:** Use the app on a mobile browser (responsive web) to plan a 30-minute walk from the Jersey City waterfront. Follow one of the suggested routes. After the walk, use the post-walk rating prompt to rate 3–5 segments encountered. Confirm all ratings persisted, composite scores updated, and previously-dashed segments are now shown as solid.
+
+---
+
+## Stream F — Maintainability & Refactoring
+
+This stream is driven by current codebase maintainability risks rather than new user-facing product scope. The largest issues identified are concentrated in:
+- `api/app/main.py` — mixes auth, route serialization, admin ingestion triggers, segment queries, and route persistence in one module
+- `api/app/ingest.py` — mixes OSM provider concerns, feature normalization, sidewalk heuristics, DB engine access, and persistence helpers in one file
+- `api/app/routing.py` — combines graph projection, scoring heuristics, candidate generation, loop construction, and path summarization in one module
+- `frontend/src/components/MapView.tsx` — combines production map rendering, data fetching, route overlay math, interaction state, and E2E mock-map infrastructure in one component
+- `frontend/src/pages/PlanPanel.tsx` — combines form rendering, geolocation, debounced location search, payload building, and route request orchestration in one component
+
+### F1 — Split FastAPI App Composition Into Domain Routers And Services
+
+**Description:**
+Refactor the current `api/app/main.py` monolith into focused modules so auth, locations, segments, routes, and admin operations have separate routers and service helpers. Keep API contracts unchanged while isolating concerns like auth token handling, SQL access, and response serialization.
+
+Suggested target structure:
+- `app/api/auth.py`
+- `app/api/locations.py`
+- `app/api/segments.py`
+- `app/api/routes.py`
+- `app/api/admin.py`
+- `app/services/auth.py`
+- `app/services/routes.py`
+- `app/services/segments.py`
+
+**Completion criteria:**
+- `app.main` is reduced to app setup, middleware, lifespan wiring, and router registration
+- Auth logic is no longer interleaved with route/segment/admin handlers
+- Direct SQL for route persistence and segment retrieval is moved behind focused service functions
+- Existing request/response payloads and endpoint paths remain backward compatible
+- Tests covering auth, routes, locations, and segments continue to pass without fixture rewrites beyond import-path adjustments
+
+**Test cases:**
+1. Existing auth API tests still pass with no endpoint contract changes
+2. Existing segments and routes API tests still pass with the same payload shape
+3. `GET /health`, `POST /auth/login`, `GET /segments`, `POST /routes/suggest`, and `POST /admin/score/batch` still resolve through registered routers
+4. Importing `app.main` no longer eagerly pulls unrelated implementation details into one file
+
+---
+
+### F2 — Decompose OSM Ingest Into Provider, Normalization, Filtering, And Persistence Layers
+
+**Description:**
+Break `api/app/ingest.py` into smaller units with explicit responsibilities. The current file couples raw OSM fetches, geometry normalization, residential sidewalk heuristics, and database upsert behavior, making the ingest pipeline harder to reason about and extend safely.
+
+Suggested split:
+- provider adapters for fetching source data
+- normalizers for generic OSM feature extraction
+- segment filtering / sidewalk heuristics module
+- persistence layer for upsert operations
+- thin orchestration entrypoints for CLI and admin-triggered runs
+
+**Completion criteria:**
+- Segment/park/water/POI extraction share reusable normalization helpers instead of duplicating row-to-record logic
+- Sidewalk and pedestrian eligibility heuristics live in a dedicated module with narrowly scoped functions
+- DB engine lifecycle and insert/upsert behavior are isolated from OSM fetch logic
+- `DataProvider` remains the extension point for alternate data sources
+- Existing ingest behavior and idempotency remain unchanged
+
+**Test cases:**
+1. Existing ingest tests still pass with unchanged observable behavior
+2. Segment filtering rules for `residential`, `tertiary`, `secondary`, and excluded highways remain intact
+3. A focused unit test can exercise sidewalk heuristic behavior without needing to invoke OSM fetch code
+4. A focused unit test can exercise normalization of park/water/POI rows without touching database persistence
+
+---
+
+### F3 — Refactor Routing Engine Into Search, Scoring, And Candidate Assembly Modules
+
+**Description:**
+Refactor `api/app/routing.py` so route search strategies, edge weighting policies, graph projection, and route summary assembly are not co-located in a single module. This should make it easier to evolve route priorities and candidate diversification without fragile cross-coupling.
+
+Suggested split:
+- graph search helpers
+- route weighting policy per priority mode
+- loop-route strategy
+- point-to-point strategy
+- route candidate summarization / metrics helpers
+
+**Completion criteria:**
+- Priority weighting rules are isolated from graph traversal orchestration
+- Loop-specific path construction is isolated from point-to-point candidate generation
+- Candidate metric aggregation is reusable and independently testable
+- Public entrypoints for route suggestion remain stable for callers
+- Existing routing behavior remains covered by tests
+
+**Test cases:**
+1. Existing routing tests still pass with no endpoint-level behavior regressions
+2. Priority weighting can be unit tested without executing full route generation
+3. Loop candidate selection can be unit tested separately from point-to-point route selection
+4. Candidate overlap filtering remains unchanged for existing multi-route scenarios
+
+---
+
+### F4 — Break MapView Into Hooks, Presentational Panels, And Test Utilities
+
+**Description:**
+Refactor `frontend/src/components/MapView.tsx` into smaller React units. The current file owns map bootstrapping, network fetches, line-layer configuration, detail-panel formatting, route overlay projection, and E2E mock-map behavior, which creates too many reasons to change one component.
+
+Suggested split:
+- `useMapSegments` for bbox-driven segment fetching
+- `useMapRouteOverlay` for route overlay/source synchronization
+- presentational components for segment detail and legend UI
+- map layer configuration helpers
+- move `MockMap` into test-only support code or a dedicated test utility module
+
+**Completion criteria:**
+- Production map rendering code is separated from test-only mock-map infrastructure
+- Data-fetching effects are extracted into hooks with narrow dependency surfaces
+- Detail-panel formatting and legend rendering are moved into smaller presentational modules
+- The top-level `MapView` component primarily coordinates hooks and layout
+- Existing unit and e2e tests continue to pass with stable behavior
+
+**Test cases:**
+1. Existing `MapView` tests still pass after the file split
+2. Mock-map behavior remains available to tests without shipping test infrastructure inline with production UI code
+3. Segment fetch behavior can be tested via a hook-focused test without rendering the full detail panel
+4. Route overlay updates still respond correctly to route selection and map move events
+
+---
+
+### F5 — Extract Route Planning Form State And Location Search Into Reusable Hooks/Components
+
+**Description:**
+Refactor `frontend/src/pages/PlanPanel.tsx` so route form rendering, geolocation, debounced search, and request submission are separated. The current component duplicates start/end search behavior and mixes async orchestration with a large JSX tree.
+
+Suggested split:
+- `useLocationSuggestions` hook reused for both start and end fields
+- `LocationSearchField` component
+- `useRouteSubmission` hook or planner service helper
+- smaller presentational components for route mode, length target, and priority controls
+
+**Completion criteria:**
+- Start/end location search no longer duplicate nearly identical effect logic
+- Geolocation, remote search, and route submission are extracted from the main page component
+- `PlanPanel` is primarily responsible for composition and layout
+- Existing route planner context contract remains stable unless a clearly better boundary is introduced with matching test updates
+- Existing planner UX and payload shapes remain unchanged
+
+**Test cases:**
+1. Existing `PlanPanel` tests still pass with unchanged user-facing behavior
+2. Start and end search fields are powered by the same reusable suggestion logic
+3. A focused test can cover debounced search error handling without rendering the entire planner page
+4. A focused test can cover route submission payload generation for loop and destination modes

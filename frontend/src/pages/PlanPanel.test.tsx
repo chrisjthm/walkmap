@@ -1,13 +1,42 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PlanPanel from "./PlanPanel";
 import { RoutePlannerProvider } from "../components/routePlanner";
+import { AuthProvider, useAuth } from "../components/auth";
 
-const renderPanel = () =>
+function SessionBootstrap({
+  token,
+  email,
+}: {
+  token?: string;
+  email?: string;
+}) {
+  const { setSession } = useAuth();
+
+  useEffect(() => {
+    if (token && email) {
+      setSession(token, { id: "user-1", email });
+    }
+  }, [email, setSession, token]);
+
+  return null;
+}
+
+const renderPanel = (options?: { token?: string; email?: string }) =>
   render(
-    <RoutePlannerProvider>
-      <PlanPanel />
-    </RoutePlannerProvider>,
+    <AuthProvider>
+      <RoutePlannerProvider>
+        <MemoryRouter initialEntries={["/plan"]}>
+          <SessionBootstrap token={options?.token} email={options?.email} />
+          <Routes>
+            <Route path="/plan" element={<PlanPanel />} />
+            <Route path="/login" element={<div>Login Page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </RoutePlannerProvider>
+    </AuthProvider>,
   );
 
 describe("PlanPanel", () => {
@@ -316,5 +345,103 @@ describe("PlanPanel", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Location search is temporarily unavailable.",
     );
+  });
+
+  it("redirects logged-out users to login when saving a route", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      void _init;
+      const url = String(input);
+      if (url.includes("/routes/suggest")) {
+        return {
+          ok: true,
+          json: async () => ({
+            routes: [
+              {
+                segment_ids: ["a", "b"],
+                geometry: {
+                  type: "LineString",
+                  coordinates: [[-74.0431, 40.7178], [-74.04, 40.72]],
+                },
+                distance_m: 2400,
+                duration_s: 1600,
+                avg_score: 91,
+                verified_count: 2,
+                unverified_count: 1,
+              },
+            ],
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: /find routes/i }));
+    await screen.findByRole("button", { name: /save selected route/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /save selected route/i }));
+
+    await screen.findByText("Login Page");
+  });
+
+  it("sends bearer auth when saving a selected route", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/routes/suggest")) {
+        return {
+          ok: true,
+          json: async () => ({
+            routes: [
+              {
+                segment_ids: ["a", "b"],
+                geometry: {
+                  type: "LineString",
+                  coordinates: [[-74.0431, 40.7178], [-74.04, 40.72]],
+                },
+                distance_m: 2400,
+                duration_s: 1600,
+                avg_score: 91,
+                verified_count: 2,
+                unverified_count: 1,
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/routes")) {
+        return {
+          ok: true,
+          json: async () => ({
+            route_id: "saved-route-1",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    renderPanel({ token: "token-123", email: "user@example.com" });
+
+    fireEvent.click(screen.getByRole("button", { name: /find routes/i }));
+    await screen.findByRole("button", { name: /save selected route/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /save selected route/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const saveCall = fetchMock.mock.calls.find(
+      ([input]) => String(input).endsWith("/routes"),
+    ) as [RequestInfo | URL, RequestInit | undefined] | undefined;
+    expect(saveCall).toBeTruthy();
+    expect(saveCall?.[1]).toMatchObject({
+      method: "POST",
+    });
+    const headers = new Headers(saveCall?.[1]?.headers as HeadersInit | undefined);
+    expect(headers.get("Authorization")).toBe("Bearer token-123");
+    expect(headers.get("Content-Type")).toBe("application/json");
   });
 });

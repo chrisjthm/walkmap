@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getApiBase, useAuth } from "../components/auth";
 
 type AuthSuccessPayload = {
@@ -9,6 +9,12 @@ type AuthSuccessPayload = {
     email: string;
   };
 };
+
+type LoginLocationState = {
+  returnTo?: string;
+};
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeErrorDetail = (detail: unknown): string | null => {
   if (typeof detail === "string" && detail.trim()) {
@@ -42,6 +48,7 @@ const parseErrorMessage = async (response: Response) => {
 };
 
 export default function LoginPanel() {
+  const location = useLocation();
   const navigate = useNavigate();
   const { setSession } = useAuth();
   const [email, setEmail] = useState("");
@@ -52,8 +59,13 @@ export default function LoginPanel() {
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!email.trim() || !password) {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
       setError("Enter both your email and password.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError("Enter a valid email address.");
       return;
     }
 
@@ -68,7 +80,7 @@ export default function LoginPanel() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email: email.trim(),
+          email: trimmedEmail,
           password,
         }),
       });
@@ -79,7 +91,8 @@ export default function LoginPanel() {
 
       const payload = (await response.json()) as AuthSuccessPayload;
       setSession(payload.token, payload.user);
-      navigate("/");
+      const returnTo = (location.state as LoginLocationState | null)?.returnTo ?? "/";
+      navigate(returnTo);
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : "We couldn’t sign you in right now.",
@@ -99,7 +112,7 @@ export default function LoginPanel() {
       </section>
 
       <section className="panel-section">
-        <form className="panel-grid" onSubmit={onSubmit}>
+        <form className="panel-grid" noValidate onSubmit={onSubmit}>
           <div className="panel-field">
             <label className="panel-label" htmlFor="email">
               Email
