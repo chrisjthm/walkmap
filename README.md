@@ -150,3 +150,92 @@ export DATABASE_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@l
 ./scripts/db-migrate.sh
 cd api && pytest
 ```
+
+## Railway Backend Deployment
+
+The backend is deployed on Railway as:
+
+- [`api/Dockerfile`](./api/Dockerfile) includes the Alembic files needed for deploy-time migrations and defaults to a production-safe `uvicorn` command that respects Railway's `PORT`.
+- [`api/railway.toml`](./api/railway.toml) sets the pre-deploy migration command, start command, healthcheck path, and restart policy for Railway.
+- a Railway API service that deploys from the `/api` subdirectory
+- a separate PostGIS service on Railway private networking
+
+Railway runs `alembic upgrade head` before starting the FastAPI app.
+
+### Repeatable deploy
+
+Deploy the API service from the `api` directory:
+
+```bash
+cd /path/to/walkmap
+railway up api --service walkmap --path-as-root -d -m "Deploy API from /api root"
+```
+
+If Railway auto-deploy is enabled, pushes to the tracked branch can replace the manual CLI deploy.
+
+### Disable / Re-enable
+
+To fully disable the Railway deployment and avoid ongoing compute cost:
+
+1. Remove the current API deployment:
+
+```bash
+cd /path/to/walkmap
+railway down -s walkmap -y
+```
+
+2. Remove the current PostGIS deployment:
+
+```bash
+railway down -s walkmap-db -y
+```
+
+3. If you do not need to preserve database contents, delete the Railway volume from the dashboard.
+
+The volume is a project-level resource, not a separate service. In the Railway dashboard, open the project, find `Volumes`, and delete `walkmap-db-volume`.
+
+4. If you want to prevent future code pushes from bringing the API back up, disconnect the GitHub source for the `walkmap` service in the Railway dashboard.
+
+To re-enable the deployment later:
+
+1. Recreate or reattach the PostGIS volume if it was deleted:
+
+```bash
+cd /path/to/walkmap
+railway volume add --mount-path /var/lib/postgresql/data
+```
+
+If the volume is recreated from scratch, ensure the `walkmap-db` service still has `PGDATA=/var/lib/postgresql/data/pgdata` set so Postgres initializes inside a subdirectory on the mounted volume.
+2. Ensure the `walkmap-db` service still has the expected Postgres/PostGIS configuration and environment variables.
+3. Deploy the API again with:
+
+```bash
+cd /path/to/walkmap
+railway up api --service walkmap --path-as-root -d -m "Deploy API from /api root"
+```
+
+4. If the database was reset or recreated, rerun the data refresh jobs below to repopulate and rescore production data.
+
+### Data refresh jobs
+
+When production data needs to be refreshed, trigger the admin jobs:
+
+```bash
+curl -X POST https://<railway-url>/admin/ingest/osm
+curl -X POST https://<railway-url>/admin/score/batch
+```
+
+Use the ingest job to reload source map data. Use the batch scoring job when new or refreshed segments need scores. The scoring job can take a while on larger refreshes; Railway logs show progress output such as `Scored 200/8442 segments`.
+
+To check scoring progress from the CLI:
+
+```bash
+railway logs --latest -s walkmap -n 320
+```
+
+### Manual verification
+
+- `curl https://<railway-url>/health` returns `{"status":"ok"}`.
+- `curl "https://<railway-url>/segments?bbox=-74.09,40.69,-74.02,40.74"` returns Jersey City segment data.
+- Railway logs show the batch scorer progressing and eventually finishing after `POST /admin/score/batch`.
+- Railway deploy logs show `alembic upgrade head` completing before the app starts.
