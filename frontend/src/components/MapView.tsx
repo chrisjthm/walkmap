@@ -7,6 +7,7 @@ import {
   computeScoreAnchors,
   ScoreLegend,
 } from "./mapScoreUtils";
+import { getApiBase, getMapStyleUrl } from "../env";
 import { useRoutePlanner } from "./routePlanner";
 
 type SegmentProperties = {
@@ -101,14 +102,6 @@ const buildRatingBlendText = (ratingCount: number) => {
     return `Score is a blend of AI estimate and ${ratingCount} user rating(s)`;
   }
   return "Score is based entirely on user ratings";
-};
-
-const getApiBase = () => {
-  const rawBase = import.meta.env.VITE_API_BASE_URL;
-  if (!rawBase) {
-    return "";
-  }
-  return rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
 };
 
 type MapEventHandler = (event: { point: { x: number; y: number } }) => void;
@@ -383,12 +376,7 @@ export default function MapView() {
   }, [selectedDetail?.id]);
 
   const apiBase = useMemo(() => getApiBase(), []);
-  const styleUrl = useMemo(
-    () =>
-      import.meta.env.VITE_MAP_STYLE_URL ??
-      "https://tiles.openfreemap.org/styles/liberty",
-    [],
-  );
+  const styleUrl = useMemo(() => getMapStyleUrl(), []);
 
   const scoreBreakdownId = selectedDetail ? `score-breakdown-${selectedDetail.id}` : undefined;
   const ratingBlendText = selectedDetail

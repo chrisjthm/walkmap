@@ -150,3 +150,67 @@ export DATABASE_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@l
 ./scripts/db-migrate.sh
 cd api && pytest
 ```
+
+## Railway Backend Deployment
+
+The backend is deployed on Railway as:
+
+- [`api/Dockerfile`](./api/Dockerfile) includes the Alembic files needed for deploy-time migrations and defaults to a production-safe `uvicorn` command that respects Railway's `PORT`.
+- [`api/railway.toml`](./api/railway.toml) sets the pre-deploy migration command, start command, healthcheck path, and restart policy for Railway.
+- a Railway API service that deploys from the `/api` subdirectory
+- a separate PostGIS service on Railway private networking
+
+Railway runs `alembic upgrade head` before starting the FastAPI app.
+
+### Repeatable deploy
+
+Deploy the API service from the `api` directory:
+
+```bash
+cd /path/to/walkmap
+railway up api --service walkmap --path-as-root -d -m "Deploy API from /api root"
+```
+
+If Railway auto-deploy is enabled, pushes to the tracked branch can replace the manual CLI deploy.
+
+### Data refresh jobs
+
+When production data needs to be refreshed, trigger the admin jobs:
+
+```bash
+curl -X POST https://<railway-url>/admin/ingest/osm
+curl -X POST https://<railway-url>/admin/score/batch
+```
+
+Use the ingest job to reload source map data. Use the batch scoring job when new or refreshed segments need scores. The scoring job can take a while on larger refreshes; Railway logs show progress output such as `Scored 200/8442 segments`.
+
+To check scoring progress from the CLI:
+
+```bash
+railway logs --latest -s walkmap -n 320
+```
+
+### Manual verification
+
+- `curl https://<railway-url>/health` returns `{"status":"ok"}`.
+- `curl "https://<railway-url>/segments?bbox=-74.09,40.69,-74.02,40.74"` returns Jersey City segment data.
+- Railway deploy logs show `alembic upgrade head` completing before the app starts.
+
+## Vercel Frontend Deployment
+
+The frontend deploys cleanly to Vercel from the `frontend` subdirectory:
+
+- set the Vercel project root directory to `frontend`
+- keep the build command as `npm run build`
+- keep the output directory as `dist`
+- add `VITE_API_BASE_URL=https://<railway-url>` in the Vercel dashboard
+- optionally add `VITE_MAP_STYLE_URL=https://tiles.openfreemap.org/styles/liberty` if you want to override the default map style
+
+Use [`frontend/.env.example`](./frontend/.env.example) as the local reference for required Vite environment variables. Do not commit production values.
+
+### Manual verification
+
+- Visit `https://<vercel-url>` and confirm the map loads over Jersey City.
+- Open the browser network tab and confirm API requests target the Railway backend URL instead of `localhost`.
+- Click a segment and confirm detail data loads from the deployed API.
+- Push a frontend change to `main` and confirm Vercel auto-deploys successfully.

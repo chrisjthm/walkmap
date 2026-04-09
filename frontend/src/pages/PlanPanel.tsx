@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../components/auth";
+import { getApiBase } from "../env";
 import {
   formatCoordinateLabel,
   type LocationSearchSuggestion,
@@ -67,14 +68,6 @@ const formatDuration = (seconds: number) => {
     return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`;
   }
   return `${totalMinutes} min`;
-};
-
-const getApiBase = () => {
-  const rawBase = import.meta.env.VITE_API_BASE_URL;
-  if (!rawBase) {
-    return "";
-  }
-  return rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
 };
 
 const presetSuggestions = (query: string): LocationSearchSuggestion[] => {

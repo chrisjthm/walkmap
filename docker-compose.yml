@@ -20,6 +20,7 @@ services:
     build:
       context: ./api
     container_name: walkmap-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       DATABASE_URL: ${DATABASE_URL:?Missing DATABASE_URL. Copy .env.example to .env and set values.}
       JWT_SECRET: ${JWT_SECRET:?Missing JWT_SECRET. Copy .env.example to .env and set values.}

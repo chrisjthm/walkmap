@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { getApiBase as getConfiguredApiBase } from "../env";
 
 type AuthUser = {
   id: string;
@@ -16,11 +17,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export const getApiBase = () => {
-  const rawBase = import.meta.env.VITE_API_BASE_URL;
-  if (!rawBase) {
-    return "";
-  }
-  return rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
+  return getConfiguredApiBase();
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
